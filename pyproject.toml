@@ -1,0 +1,11 @@
+[project]
+name = "chatbridge"
+version = "2.50.0"
+description = "Windows desktop bridge for browser-based AI chats"
+requires-python = ">=3.10"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]

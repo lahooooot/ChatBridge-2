@@ -1,0 +1,297 @@
+{
+  "version": "2.50.0",
+  "transport": "ws://127.0.0.1:8787",
+  "client": "internal-browser",
+  "authentication": "hello.token must match per-process secret",
+  "max_frame_bytes": 25165824,
+  "messages": {
+    "hello": {
+      "direction": "b->d",
+      "required": [
+        "version",
+        "agent",
+        "token"
+      ]
+    },
+    "cs_ready": {
+      "direction": "b->d",
+      "required": [
+        "platform",
+        "page_url"
+      ]
+    },
+    "user_message": {
+      "direction": "d->b",
+      "required": [
+        "text",
+        "platform",
+        "request_id"
+      ],
+      "optional": [
+        "conv_url",
+        "attachment",
+        "fresh"
+      ]
+    },
+    "prompt_error": {
+      "direction": "b->d",
+      "required": [
+        "platform",
+        "request_id",
+        "reason"
+      ]
+    },
+    "assistant_stream": {
+      "direction": "b->d",
+      "required": [
+        "platform",
+        "text",
+        "request_id",
+        "page_url"
+      ],
+      "optional": [
+        "think",
+        "think_active"
+      ]
+    },
+    "assistant_waiting": {
+      "direction": "b->d",
+      "required": [
+        "platform",
+        "request_id",
+        "waited_ms",
+        "has_text",
+        "stage"
+      ]
+    },
+    "assistant_response": {
+      "direction": "b->d",
+      "required": [
+        "platform",
+        "text",
+        "request_id",
+        "page_url"
+      ],
+      "optional": [
+        "think",
+        "files",
+        "parsed_calls",
+        "continuation_pending"
+      ]
+    },
+    "assistant_capture_failed": {
+      "direction": "b->d",
+      "required": [
+        "platform",
+        "request_id",
+        "reason"
+      ]
+    },
+    "stop_generation": {
+      "direction": "d->b",
+      "required": [
+        "platform",
+        "request_id"
+      ]
+    },
+    "platform_busy": {
+      "direction": "b->d",
+      "required": [
+        "platform",
+        "busy"
+      ]
+    },
+    "limit_reached": {
+      "direction": "b->d",
+      "required": [
+        "platform",
+        "kind",
+        "where"
+      ],
+      "optional": [
+        "snippet"
+      ]
+    },
+    "new_chat": {
+      "direction": "d->b",
+      "required": [
+        "platform",
+        "request_id"
+      ],
+      "optional": [
+        "resume"
+      ]
+    },
+    "tool_call": {
+      "direction": "p->d",
+      "required": [
+        "id",
+        "tool",
+        "args",
+        "platform",
+        "request_id",
+        "page_url"
+      ]
+    },
+    "tool_result": {
+      "direction": "d->b",
+      "required": [
+        "id",
+        "ok",
+        "result",
+        "platform",
+        "request_id"
+      ],
+      "optional": [
+        "error",
+        "attachment"
+      ]
+    },
+    "tool_delivery": {
+      "direction": "b->d",
+      "required": [
+        "platform",
+        "request_id",
+        "count",
+        "tools",
+        "verdict",
+        "ok"
+      ]
+    },
+    "approval_required": {
+      "direction": "d->p",
+      "required": [
+        "id",
+        "tool",
+        "summary"
+      ],
+      "optional": [
+        "detail",
+        "timeout"
+      ]
+    },
+    "approval_response": {
+      "direction": "p->d",
+      "required": [
+        "id",
+        "approved"
+      ]
+    },
+    "file_upload": {
+      "direction": "d->b",
+      "required": [
+        "id",
+        "name",
+        "mime",
+        "data_url"
+      ]
+    },
+    "upload_result": {
+      "direction": "b->d",
+      "required": [
+        "id",
+        "ok"
+      ],
+      "optional": [
+        "error",
+        "size"
+      ]
+    },
+    "file_fetch": {
+      "direction": "d->b",
+      "required": [
+        "id",
+        "url"
+      ],
+      "optional": [
+        "name"
+      ]
+    },
+    "file_data": {
+      "direction": "b->d",
+      "required": [
+        "id",
+        "ok"
+      ],
+      "optional": [
+        "data_url",
+        "error"
+      ]
+    },
+    "list_chats": {
+      "direction": "d->b",
+      "required": [
+        "platform",
+        "request_id"
+      ]
+    },
+    "chat_list": {
+      "direction": "b->d",
+      "required": [
+        "request_id",
+        "ok"
+      ],
+      "optional": [
+        "chats",
+        "reason"
+      ]
+    },
+    "read_chat": {
+      "direction": "d->b",
+      "required": [
+        "platform",
+        "url",
+        "request_id"
+      ],
+      "optional": [
+        "limit"
+      ]
+    },
+    "load_older": {
+      "direction": "d->b",
+      "required": [
+        "platform",
+        "url",
+        "request_id"
+      ]
+    },
+    "chat_content": {
+      "direction": "b->d",
+      "required": [
+        "request_id",
+        "url",
+        "ok"
+      ],
+      "optional": [
+        "messages",
+        "can_older",
+        "full",
+        "reason"
+      ]
+    }
+  },
+  "ui_events": [
+    "browser_status",
+    "browser_log",
+    "tool_started",
+    "tool_finished",
+    "tool_terminal",
+    "tool_budget",
+    "fs_changed",
+    "fs_saved",
+    "file_ready",
+    "file_saved",
+    "terminal_output",
+    "terminal_exit",
+    "project_attached",
+    "git_result",
+    "approval_closed",
+    "provider_status",
+    "logs_exported",
+    "notice",
+    "error",
+    "message_queued",
+    "generation_stopped"
+  ],
+  "approval_authority": "Trusted desktop UI only; remote approval responses may deny but never authorize local execution"
+}

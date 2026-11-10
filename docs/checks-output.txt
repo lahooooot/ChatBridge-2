@@ -1,0 +1,85 @@
+Python syntax: OK
++ node --check /home/ubuntu/chatbridge/desktop/agent_cb.js
++ node --check /home/ubuntu/chatbridge/desktop/ui/i18n.js
++ node --check /home/ubuntu/chatbridge/desktop/ui/app.js
++ /usr/bin/python3 /home/ubuntu/chatbridge/scripts/ver_check.py
+Version markers are synchronized: 2.50.0
++ /usr/bin/python3 /home/ubuntu/chatbridge/scripts/ui_dom_check.py
+PASS: 143 DOM ids, 6 settings categories, 5 tools, 6 themes, 4 font sizes, 207 locale keys; no radios, frames, or unsafe HTML sinks.
++ /usr/bin/python3 -m pytest -q
+........................................................................ [ 19%]
+........................................................................ [ 39%]
+........................................................................ [ 59%]
+........................................................................ [ 79%]
+........................................................................ [ 98%]
+....                                                                     [100%]
+364 passed in 12.14s
++ /usr/bin/python3 /home/ubuntu/chatbridge/scripts/visual_check_agent.py
+PASS send/chatgpt (0.51s)
+PASS send/claude (0.35s)
+PASS send/zai (0.36s)
+PASS send/deepseek (0.35s)
+PASS send/gemini (0.35s)
+PASS send/generic (0.34s)
+PASS send/generic-contenteditable (0.34s)
+PASS chatgpt/optimistic (0.41s)
+PASS zai/multi-unit (0.09s)
+PASS deepseek/multi-unit (0.09s)
+PASS markdown/walker-and-banner (0.12s)
+PASS markdown/collapse-preserves-DOM (1.85s)
+PASS markdown/nested-shadow (0.09s)
+PASS generic/baseline-diff (0.10s)
+PASS generic/bottom-editor (0.35s)
+PASS send/focused-enter-fallback (0.53s)
+PASS deepseek/pow-accepted (1.23s)
+PASS deepseek/pow-stuck (1.62s)
+PASS deepseek/pow-dropped (7.86s)
+PASS deepseek/rect-arrow-disabled (0.14s)
+PASS watcher/two-read-busy-events (9.75s)
+PASS thinking/placeholder-and-expand-once (0.14s)
+PASS limits/scoped-only-no-navigation (0.14s)
+PASS upload/input (2.53s)
+PASS upload/drag (5.23s)
+PASS upload/paste (7.94s)
+PASS upload/unverified-rejected (8.19s)
+PASS fetch/credentials-blob-size-origin (0.10s)
+PASS files/response-and-transcript-assets (0.10s)
+PASS transcript/cap-dedupe-lazy (0.79s)
+PASS controls/approval-RTL-timeout-pill (1.67s)
+PASS contract/JSON-errors-dispose (0.15s)
+PASS send/stop-cancels-reinjection (0.68s)
+PASS injection/native-setter (0.48s)
+PASS injection/contenteditable-text (0.48s)
+PASS injection/unverified-rejected (0.33s)
+PASS markdown/nested-code-banner (1.84s)
+PASS markdown/composed-shadow-units (0.08s)
+PASS limits/wire-cap-and-hysteresis (0.21s)
+PASS controls/desktop-approval-dismiss (0.11s)
+PASS markdown/shadow-tool-collapse (1.84s)
+PASS navigation/chatgpt (1.50s)
+PASS navigation/claude (1.49s)
+PASS navigation/zai (1.48s)
+PASS navigation/deepseek (1.49s)
+PASS navigation/gemini (1.50s)
+PASS navigation/generic (1.48s)
+
+47/47 passed; 0 failed; 69.6s.
+Scope: synthetic DOMs only; live selector drift, trusted events, WebView2, driver capture/parser and account/network behavior require integration/manual tests.
++ /usr/bin/python3 /home/ubuntu/chatbridge/scripts/visual_check_ui.py
+PASS: visible browser header, honest connection, no radios
+PASS: right drag narrows right dock; throttled native fit follows
+PASS: second physical divider resizes browser and utility
+PASS: header force-reveals persisted hidden dock
+PASS: file tree → editable FILE → dirty → Ctrl+S → fs_saved
+PASS: rules edit/add/delete/toggle/master persist before API preview
+PASS: six themes, four sizes, Persian RTL and right-drag geometry
+PASS: safe minimal Markdown, ordinary code/tables/links, thinking, no tool fence
+PASS: backend tool_started/tool_finished render as command history
+PASS: live terminal ANSI colors, output escaped, result send
+PASS: approval card and escaped details call approval_response
+PASS: Git diff escaped; destructive calls require explicit confirmation
+PASS: five web-model UI routes, send/stop mirror, mocked capture
+PASS: tool continuation and approval retain request Stop despite page idle; final answer releases it
+PASS: unmocked preview never claims a live native browser
+15 UI checks passed. Diagnostics: /tmp/chatbridge-ui-check
+All available automated checks passed. Windows/manual checks are separate.
