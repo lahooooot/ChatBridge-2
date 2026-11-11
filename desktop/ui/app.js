@@ -168,9 +168,12 @@
       out.push(line);
     }
     let text=out.join('\n');
-    const ds=text.search(/<[^>]*(?:DSML|tool_calls|invoke\s+name=)/i);
+    // Strip complete DSML/tool_calls blocks before any truncation so prose that
+    // follows a closed block is preserved.
+    text=text.replace(/<[^>\n]*DSML[^>\n]*>[\s\S]*?<\s*\/\s*[^>\n]*DSML[^>\n]*>/gi,'');
+    text=text.replace(/<[^>\n]*tool_calls[^>\n]*>[\s\S]*?<\/[^>\n]*tool_calls[^>\n]*>/gi,'');
+    const ds=text.search(/<\s*\/?\s*(?:[|\uFF5C]{1,2}|!\[|\])\s*DSML\b/i);
     if(ds>=0)text=text.slice(0,ds); // Do not leak incomplete alternate tool syntax.
-    text=text.replace(/^.*chatbridge-tool-(?:call|result).*$/gim,'');
     return text.trim();
   }
   function safeUrl(value, image=false) {

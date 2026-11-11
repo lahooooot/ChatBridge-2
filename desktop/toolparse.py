@@ -664,15 +664,20 @@ def parse_tool_calls(text: str, final: bool = True) -> list[dict[str, Any]]:
 
 
 def strip_tool_blocks(text: str) -> str:
-    """Remove raw calls, results, DSML, and taught fragments, even when invalid.
+    """Remove explicit call/result/DSML regions from visible text.
 
-    Ordinary fenced/inline code and prose are kept verbatim apart from invisible
-    bidi marks and the outer whitespace left by removed protocol blocks.
+    Naked taught JSON (``fragment`` regions) is a protocol error and is never
+    dispatched, but it is ordinary visible text in the transcript, so it stays
+    in the displayed prose. Ordinary fenced/inline code and prose are kept
+    verbatim apart from invisible bidi marks and the outer whitespace left by
+    removed protocol blocks.
     """
     text = _text(text)
     output: list[str] = []
     position = 0
     for region in _regions(text):
+        if region.kind == "fragment":
+            continue
         if region.start < position:
             position = max(position, region.end)
             continue

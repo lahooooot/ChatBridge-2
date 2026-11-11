@@ -209,19 +209,22 @@ def test_naked_taught_fragments_error_instead_of_execute(body):
     text = "Before\n" + body + "\n"
     assert not actual(text)
     assert errors(text) == ["tool-json-fragment"]
-    assert strip_tool_blocks(text) == "Before"
+    # A naked taught fragment is a protocol error, never a dispatch, but it is
+    # ordinary visible prose in the transcript and must not be hidden.
+    assert strip_tool_blocks(text) == text.strip()
     assert parse_tool_calls(text, final=False) == []
 
 
 def test_naked_complete_fragment_preserves_surrounding_inline_prose():
     text = "Before " + request() + " After."
-    assert strip_tool_blocks(text) == "Before  After."
+    # Naked JSON is kept in the transcript; it is never dispatched.
+    assert strip_tool_blocks(text) == text
     assert not has_unterminated(text)
 
 
 def test_naked_incomplete_fragment_preserves_following_natural_prose():
     text = 'Before\n{"tool":"read_file","args":\nPlease retry the request.'
-    assert strip_tool_blocks(text) == "Before\nPlease retry the request."
+    assert strip_tool_blocks(text) == text
     assert has_unterminated(text)
 
 
@@ -551,7 +554,8 @@ def test_naked_taught_root_is_detected_regardless_of_member_order(raw):
     text = "Before\n" + raw
     assert actual(text) == []
     assert errors(text) == ["tool-json-fragment"]
-    assert strip_tool_blocks(text) == "Before"
+    # Naked JSON stays visible in the transcript but is never dispatched.
+    assert strip_tool_blocks(text) == text
 
 
 def test_rescue_finds_real_tool_after_empty_root_and_renderer_fences():
