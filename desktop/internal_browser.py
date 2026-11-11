@@ -254,6 +254,12 @@ class InternalBrowser:
 
     def evaluate(self, script, timeout=10, guard=None):
         if not self.window:
+            # A closed browser can still hold a stale lock from an orphaned
+            # call. Clear it before raising so reopening is not wedged.
+            if not self._eval_lock.acquire(timeout=min(timeout, 5)):
+                self._force_release_eval_lock()
+            else:
+                self._eval_lock.release()
             raise RuntimeError('Internal browser is closed')
         # Cap the wait so a hung earlier call cannot stall the model switch
         # or sidebar navigation for the whole per-request timeout. If the

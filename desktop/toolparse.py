@@ -382,7 +382,16 @@ def _fence_regions(text: str) -> tuple[list[_Region], list[tuple[int, int]]]:
                 if _is_anchor(next_label, True):
                     complete = False
                 else:
-                    end += len(lines[close])
+                    closing = lines[close]
+                    fence_line = _FENCE.fullmatch(closing.rstrip("\r\n"))
+                    after = fence_line.group(2) if fence_line else ""
+                    if after.strip():
+                        # Prose continues after the closing fence on the same
+                        # line. Consume only the fence and its leading padding
+                        # so the trailing sentence survives.
+                        end = offsets[close] + closing.index(after) + len(after) - len(after.lstrip())
+                    else:
+                        end += len(closing)
             if kind == "call":
                 new_end, rescued = _extend_rescue(text, body_start, end)
                 if new_end > end or not canonical:

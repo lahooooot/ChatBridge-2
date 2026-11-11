@@ -273,7 +273,8 @@
       const pres = all(HINTS.common.pre, node);
       if (pres.length === 1) {
         const overhead = overheadText(node, pres[0]).trim();
-        const prose = [...node.children].some(n => /^(P|H[1-6]|UL|OL|BLOCKQUOTE)$/.test(n.tagName) && !contains(n, pres[0]));
+        const reduced=overhead.replace(/\b(copy(?: code)?|download(?: code)?|copied|code)\b/gi,'').replace(/\bchatbridge(?:-tool-(?:call|result))?\b/gi,'').trim();
+        const prose=[...node.querySelectorAll('p,h1,h2,h3,h4,h5,h6,ul,ol,blockquote')].some(n=>!contains(n,pres[0])&&!contains(pres[0],n)) || /[.!?;:،؛\n]/.test(reduced) || reduced.split(/\s+/).filter(Boolean).length>=2;
         if (!prose && overhead.length <= 80) return codeBlock(pres[0], node);
       }
     }

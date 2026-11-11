@@ -23,7 +23,10 @@ def _command_argv(cmd):
         if not cmd.strip() or "\x00" in cmd:
             raise ValueError("Command must be a nonempty string without NUL characters")
         if os.name == "nt":
-            return [os.environ.get("COMSPEC", "cmd.exe"), "/d", "/s", "/c", cmd]
+            # A list lets Popen re-quote every element, and cmd.exe /s then strips
+            # the outer quotes, breaking quotes inside the user command. Build the
+            # full command line as one string instead so it reaches cmd.exe verbatim.
+            return f'{os.environ.get("COMSPEC", "cmd.exe")} /d /s /c "{cmd}"'
         return ["/bin/sh", "-c", cmd]
     if isinstance(cmd, (list, tuple)) and cmd and all(isinstance(part, str) and "\x00" not in part for part in cmd):
         return list(cmd)
@@ -113,6 +116,8 @@ class TerminalManager:
     def _output(self, job, stream, text):
         if not text:
             return
+        # Windows pipes emit CRLF; normalize so callers and tests compare against \n.
+        text = text.replace("\r\n", "\n")
         with self._lock:
             job[stream] += text
             excess = len(job["stdout"]) + len(job["stderr"]) - self.max_output

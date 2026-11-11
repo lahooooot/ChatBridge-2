@@ -135,6 +135,12 @@
     const projects=Array.isArray(state.projects)?state.projects:[];
     const _pb=$('projectBtn'); if(_pb) _pb.hidden = projects.length>0;
     const active=chat()?.project?.id || '';
+    if(chat()?.project){
+      const none=node('div',undefined,'workspace-row ws-none');
+      const noneName=node('button',t('no_project'),'ws-name');noneName.title=t('detach_project')||'Detach project';
+      noneName.addEventListener('click',async()=>{if(!chat()?.project)return;chat().project=null;await syncWorkspace();renderProject();persist();toast(t('project_detached')||'Project detached');if(state.active_tab==='files')refreshFiles().catch(()=>{});});
+      none.append(noneName);host.append(none);
+    }
     projects.forEach(p=>{
       const row=node('div',undefined,`workspace-row${p.id===active?' active':''}`);
       const name=node('button',p.name||p.path,'ws-name');name.title=p.path||'';name.addEventListener('click',()=>{state.active_chat_id && (chat().project=p);persist();renderProject();if(state.active_tab==='files')refreshFiles().catch(()=>{});});
@@ -164,7 +170,12 @@
     const lines=String(source || '').replace(/\r/g,'').split('\n');const out=[];let suppress=false, count=0;
     for(const line of lines){const opener=line.match(/^\s*(`{3,}|~{3,})\s*([^\s]*)\s*$/);
       if(!suppress && opener && /^chatbridge(?:-tool-(?:call|result))?$/i.test(opener[2])){suppress=true;count=opener[1].length;continue;}
-      if(suppress){if(new RegExp(`^\\s*[\x00\u0060~]{${count},}\\s*$`.replace('\u0000','')).test(line))suppress=false;continue;}
+      if(suppress){
+        const closeRe=new RegExp(`^\\s*[\x00\u0060~]{${count},}(.*)$`.replace('\u0000',''));
+        const m=line.match(closeRe);
+        if(m){suppress=false;if(m[1] && m[1].trim())out.push(m[1].trim());}
+        continue;
+      }
       out.push(line);
     }
     let text=out.join('\n');
@@ -237,10 +248,11 @@
     const host=node('div',undefined,'operations');const past=[],current=[];
     (Array.isArray(operations)?operations:[]).filter(validOperation).forEach(op=>{const item=opRow(op);(item.finished?past:current).push(item.row);});
     current.forEach(row=>host.append(row));
-    if(past.length){const history=node('details',undefined,'operation-history');history.append(node('summary',`${past.length} ${t('operation_done')}`));past.forEach(row=>history.append(row));host.append(history);}return host;
+    if(past.length===1)host.append(past[0]);
+    else if(past.length>1){const history=node('details',undefined,'operation-history');history.append(node('summary',`${past.length} ${t('operation_done')}`));past.forEach(row=>history.append(row));host.append(history);}return host;
   }
   function renderMessage(m) {
-    const article=node('article',undefined,`message ${m.role==='user'?'user':'assistant'}`);article.dataset.messageId=m.id || '';
+    const article=node('article',undefined,`message ${m.role==='user'?'user':'assistant'}`);article.dataset.messageId=m.id || '';article.id='msg-'+(m.id || Math.random());
     const head=node('div',undefined,'message-header');head.append(node('span',m.role==='user'?'U':'⌘','avatar'),node('span',m.role==='user'?t('you'):(platforms.find(p=>p.id===(m.platform||chat()?.platform))?.name||t('assistant'))));
     const projectName=m.project?.name || (m.project?.path ? m.project.path.split(/[\\/]/).pop() : '');if(projectName)head.append(node('span','⌑ '+projectName,'message-project'));
     if(m.time){const time=node('time',new Date(m.time).toLocaleTimeString(state.language,{hour:'2-digit',minute:'2-digit'}));head.append(time);}article.append(head);
@@ -250,11 +262,32 @@
     if(m.operations?.length)article.append(renderOperations(m.operations));
     if(m.files?.length){const files=node('div',undefined,'message-files');m.files.forEach(f=>{const wrap=node('div',undefined,'message-file');if(f.image&&(f.data_url||safeUrl(f.url,true))){const img=node('img');img.src=f.data_url || safeUrl(f.url,true);img.alt=f.name || '';wrap.append(img);}else if(f.data_url&&/^text\//.test(f.mime||'')){const pre=node('pre',t('loading_file'),'file-preview');wrap.append(pre);fetch(f.data_url).then(r=>r.text()).then(text=>{pre.textContent=text;}).catch(()=>{pre.textContent=t('file_unavailable');});}const button=node('button',undefined,'file-chip');button.append(node('span',f.image?'▧':'⤓'));button.title=f.name || t('file_download');button.setAttribute('aria-label',f.name || t('file_download'));button.addEventListener('click',()=>downloadFile(f,m.platform || platform()).catch(()=>{}));wrap.append(button);files.append(wrap);});article.append(files);}return article;
   }
+  let navObserver=null;
+  function renderChatNav(c) {
+    const nav=$('chatNav');if(!nav)return;nav.replaceChildren();
+    if(navObserver){navObserver.disconnect();navObserver=null;}
+    const userMsgs=(c?.messages || []).filter(m=>m.role==='user' && m.id);
+    if(userMsgs.length<2)return;
+    navObserver=new IntersectionObserver((entries)=>{
+      entries.forEach(entry=>{
+        const dot=document.getElementById('nav-'+entry.target.dataset.messageId);
+        if(dot)dot.classList.toggle('active',entry.isIntersecting);
+      });
+    },{root:$('chatStream'),rootMargin:'-20% 0px -60% 0px',threshold:0});
+    userMsgs.forEach((m,i)=>{
+      const dot=node('div',undefined,'chat-nav-dot');dot.id='nav-'+m.id;
+      dot.title=(m.text||'').slice(0,80)||('Message '+(i+1));
+      dot.addEventListener('click',()=>{const el=document.getElementById('msg-'+m.id);if(el){el.scrollIntoView({behavior:'smooth',block:'start'});}});
+      nav.append(dot);
+      const target=document.getElementById('msg-'+m.id);if(target)navObserver.observe(target);
+    });
+  }
   function renderStream() {
     const c=chat(),stream=$('chatStream');const atBottom=stream.scrollHeight-stream.clientHeight-stream.scrollTop<100;
     const welcome=$('welcome');welcome.remove();stream.replaceChildren();
     if(!c?.messages.length){stream.append(welcome);welcome.hidden=false;}else {welcome.hidden=true;stream.append(welcome);c.messages.forEach(m=>stream.append(renderMessage(m)));}
     if(atBottom || c?.messages.length<=1)stream.scrollTop=stream.scrollHeight;
+    renderChatNav(c);
   }
   function setBusy(c,value,request='') {
     if(!c)return;if(value){busyChats.set(c.id,request);if(c.id===chat()?.id)activeRequest=request || activeRequest;}else {busyChats.delete(c.id);if(c.id===chat()?.id)activeRequest='';}
