@@ -139,20 +139,56 @@ class Bridge:
             try:
                 self.loop.run_until_complete(self._serve())
             except Exception as exc:
-                self.error = str(exc)
+                message = str(exc)
+                code = getattr(exc, 'winerror', None) or getattr(exc, 'errno', None)
+                lowered = message.lower()
+                if (code == 10048 or 'winerror 10048' in lowered
+                        or 'address already in use' in lowered
+                        or 'only one usage' in lowered):
+                    message = (
+                        'Port ' + str(self.port) + ' is already in use. Another ChatBridge '
+                        'window is probably still running. Close it (or end ChatBridge in '
+                        'Task Manager) and start ChatBridge again.'
+                    )
+                self.error = message
                 self.started.set()
-                self.emit({'type': 'error', 'error': str(exc), 'source': 'bridge'})
+                self.emit({'type': 'error', 'error': message, 'source': 'bridge'})
             finally:
                 self.loop.close()
         self._thread = threading.Thread(target=runner, daemon=True, name='bridge-ws')
         self._thread.start()
         return self
 
-    def stop(self):
+    def stop(self, timeout=3):
+        """Release the driver socket and the listening port, then stop the loop.
+
+        server.close() only schedules the close. Without wait_closed() the
+        listening socket can outlive the process on Windows, and the next
+        launch fails to bind with WinError 10048.
+        """
+        if not (self.loop and self.loop.is_running()):
+            return
         async def shutdown():
-            if self.client:
-                await self.client.close()
+            try:
+                if self.client:
+                    await self.client.close()
+            except Exception:
+                log.debug('Driver socket close failed', exc_info=True)
             if self.server:
                 self.server.close()
-        if self.loop and self.loop.is_running():
-            asyncio.run_coroutine_threadsafe(shutdown(), self.loop)
+                try:
+                    await asyncio.wait_for(self.server.wait_closed(), timeout=timeout)
+                except Exception:
+                    log.debug('Bridge server did not close in time', exc_info=True)
+        try:
+            future = asyncio.run_coroutine_threadsafe(shutdown(), self.loop)
+            future.result(timeout=timeout)
+        except Exception:
+            log.debug('Bridge shutdown failed', exc_info=True)
+        # Stop the loop so the socket is fully released and the thread exits.
+        try:
+            self.loop.call_soon_threadsafe(self.loop.stop)
+        except Exception:
+            log.debug('Could not stop bridge loop', exc_info=True)
+        if self._thread and self._thread.is_alive():
+            self._thread.join(timeout=timeout)

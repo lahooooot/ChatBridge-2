@@ -7,5 +7,6 @@ build/
 dist/
 installer-output/
 .chatbridge/
+instance.lock
 .env
 *.log

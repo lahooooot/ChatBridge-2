@@ -137,7 +137,9 @@ class Api:
             # unaffected.
             if getattr(sys, 'frozen', False):
                 def _force_exit():
-                    time.sleep(1.5)
+                    # Give the bridge time to wait_closed() and release port
+                    # 8787 before the process is forced out.
+                    time.sleep(5.0)
                     os._exit(0)
                 threading.Thread(target=_force_exit, daemon=True, name='force-exit').start()
 
@@ -741,6 +743,41 @@ class Api:
         return self._spawn(apply, kind='provider_status')
 
 
+def acquire_single_instance(base):
+    """Return ('ok', handle), ('held', None), or ('error', None).
+
+    Two copies of ChatBridge used to fail much later and much less clearly:
+    the second one could not bind the WebSocket port and the user only saw
+    'WinError 10048' in the browser log. Locking a per-user file up front
+    turns that into one message. The handle stays open for the whole
+    process; the OS releases the lock when the process exits.
+    """
+    path = base / 'instance.lock'
+    try:
+        handle = open(path, 'a+b')
+    except OSError:
+        return 'error', None
+    try:
+        if os.name == 'nt':
+            import msvcrt
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        handle.close()
+        return 'held', None
+    try:
+        handle.seek(0)
+        handle.truncate()
+        handle.write(str(os.getpid()).encode('ascii'))
+        handle.flush()
+    except OSError:
+        pass
+    return 'ok', handle
+
+
 def main():
     if '--version' in sys.argv:
         print(APP_VERSION)
@@ -755,6 +792,17 @@ def main():
         return 1
     base = default_data_dir()
     base.mkdir(parents=True, exist_ok=True)
+    lock_state, _lock = acquire_single_instance(base)
+    if lock_state == 'held':
+        message = ('ChatBridge is already running.\n\n'
+                   'Close the existing window (or end ChatBridge in Task Manager) '
+                   'and start ChatBridge again.')
+        if os.name == 'nt':
+            import ctypes
+            ctypes.windll.user32.MessageBoxW(None, message, 'ChatBridge', 0x40)
+        else:
+            print(message)
+        return 1
     directory = base / 'logs'
     directory.mkdir(parents=True, exist_ok=True)
     from logging.handlers import RotatingFileHandler
