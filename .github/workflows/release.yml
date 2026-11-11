@@ -14,7 +14,7 @@ permissions:
 
 jobs:
   build:
-    name: Build Windows executable and installer
+    name: Build Windows installer and publish release
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -37,6 +37,7 @@ jobs:
           if ($version -ne $declared) { throw "Tag $tag does not match APP_VERSION $declared" }
           "tag=$tag" >> $env:GITHUB_OUTPUT
           "version=$version" >> $env:GITHUB_OUTPUT
+          Write-Host "Releasing version $version from tag $tag"
 
       - name: Verify synchronized version markers
         run: python scripts/ver_check.py
@@ -49,7 +50,7 @@ jobs:
       - name: Run tests
         run: python -m pytest -q
 
-      - name: Build executable
+      - name: Build standalone executable
         run: python -m PyInstaller --clean --noconfirm ChatBridge.spec
 
       - name: Install Inno Setup
@@ -61,30 +62,43 @@ jobs:
           python scripts/sync_installer_version.py
           $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
           if (-not (Test-Path $iscc)) { $iscc = "C:\Program Files\Inno Setup 6\ISCC.exe" }
-          if (-not (Test-Path $iscc)) { throw "ISCC.exe not found" }
+          if (-not (Test-Path $iscc)) { throw "ISCC.exe not found after installing Inno Setup" }
           & $iscc ChatBridge.iss
-          if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed" }
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed with exit code $LASTEXITCODE" }
 
-      - name: Collect artifacts
+      - name: Verify build outputs are sane
         shell: pwsh
         run: |
           $version = "${{ steps.ver.outputs.version }}"
           $exe = "dist\ChatBridge-$version.exe"
           $setup = "installer-output\ChatBridge-Setup-$version.exe"
-          if (-not (Test-Path $exe)) { throw "Missing $exe" }
-          if (-not (Test-Path $setup)) { throw "Missing $setup" }
+          if (-not (Test-Path $exe)) { throw "Missing portable executable: $exe" }
+          if (-not (Test-Path $setup)) { throw "Missing installer: $setup" }
+          $exeSize = (Get-Item $exe).Length
+          $setupSize = (Get-Item $setup).Length
+          # A real ChatBridge build is tens of MB; anything under 5 MB means
+          # PyInstaller or Inno Setup produced an empty or truncated file.
+          if ($exeSize -lt 5MB) { throw "Portable executable is suspiciously small: $exeSize bytes" }
+          if ($setupSize -lt 5MB) { throw "Installer is suspiciously small: $setupSize bytes" }
+          Write-Host "Portable:  $([math]::Round($exeSize / 1MB, 2)) MB"
+          Write-Host "Installer: $([math]::Round($setupSize / 1MB, 2)) MB"
+
+      - name: Collect release assets
+        shell: pwsh
+        run: |
+          $version = "${{ steps.ver.outputs.version }}"
           New-Item -ItemType Directory -Force -Path release-assets | Out-Null
-          Copy-Item $exe release-assets/
-          Copy-Item $setup release-assets/
+          Copy-Item "dist\ChatBridge-$version.exe" release-assets/
+          Copy-Item "installer-output\ChatBridge-Setup-$version.exe" release-assets/
           Get-FileHash release-assets/* -Algorithm SHA256 |
             ForEach-Object { "$($_.Hash.ToLower())  $([System.IO.Path]::GetFileName($_.Path))" } |
             Set-Content release-assets/SHA256SUMS.txt -Encoding utf8
           Get-ChildItem release-assets | Format-Table Name, Length
 
-      - name: Upload build artifacts
+      - name: Upload workflow artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: chatbridge-windows
+          name: chatbridge-windows-${{ steps.ver.outputs.version }}
           path: release-assets/*
           if-no-files-found: error
 
@@ -95,6 +109,43 @@ jobs:
           name: ChatBridge ${{ steps.ver.outputs.version }}
           draft: false
           prerelease: ${{ contains(steps.ver.outputs.version, '-') }}
-          generate_release_notes: true
           files: release-assets/*
           fail_on_unmatched_files: true
+          body: |
+            ## Install ChatBridge ${{ steps.ver.outputs.version }}
+
+            **Recommended — download the installer:**
+
+            ### [`ChatBridge-Setup-${{ steps.ver.outputs.version }}.exe`](https://github.com/lahooooot/ChatBridge-2/releases/download/${{ steps.ver.outputs.tag }}/ChatBridge-Setup-${{ steps.ver.outputs.version }}.exe)
+
+            Double-click it and follow the wizard. No administrator rights are required — the app installs per-user to `%LOCALAPPDATA%\Programs\ChatBridge` and creates a Start Menu shortcut.
+
+            - Windows 10 or later (x64)
+            - Requires **Microsoft Edge WebView2 Runtime**. The installer warns you if it is missing. Download it from Microsoft: https://go.microsoft.com/fwlink/p/?LinkId=2124703
+            - Uninstall anytime from Windows Settings → Apps
+
+            ### Portable alternative
+
+            Prefer no installation? Download **`ChatBridge-${{ steps.ver.outputs.version }}.exe`** and run it directly. No setup, no registry changes.
+
+            ### Files in this release
+
+            | File | Purpose |
+            |------|---------|
+            | `ChatBridge-Setup-${{ steps.ver.outputs.version }}.exe` | Installer (recommended) |
+            | `ChatBridge-${{ steps.ver.outputs.version }}.exe` | Portable executable |
+            | `SHA256SUMS.txt` | Checksums for both files |
+
+            ### Verify your download (optional)
+
+            Open PowerShell in the folder where you saved the file and run:
+
+            ```powershell
+            Get-FileHash ChatBridge-Setup-${{ steps.ver.outputs.version }}.exe -Algorithm SHA256
+            ```
+
+            Compare the result with the matching line in `SHA256SUMS.txt`.
+
+            ### What's new
+
+            See [CHANGELOG.md](https://github.com/lahooooot/ChatBridge-2/blob/main/CHANGELOG.md).
