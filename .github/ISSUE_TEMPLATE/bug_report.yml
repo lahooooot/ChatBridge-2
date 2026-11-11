@@ -1,0 +1,59 @@
+name: Bug report
+about: Something is broken in ChatBridge
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Please do not paste secrets, tokens, or the
+        contents of your `%USERPROFILE%\.chatbridge-2.50.0` profile.
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Shown in Settings → General and in the title bar
+      placeholder: 2.50.0
+    validations:
+      required: true
+  - type: dropdown
+    id: service
+    attributes:
+      label: Chat service
+      options:
+        - ChatGPT
+        - Claude
+        - z.ai
+        - DeepSeek
+        - Gemini
+        - Other / custom
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Attach a project
+        2. Send a message with a tool-call fence
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Settings → General → View. Remove anything private first.
+    validations:
+      required: false

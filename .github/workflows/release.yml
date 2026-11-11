@@ -1,0 +1,100 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to release (e.g. v2.50.0)'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build Windows executable and installer
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Resolve and validate version
+        id: ver
+        shell: pwsh
+        run: |
+          $tag = "${{ github.event.inputs.tag }}"
+          if (-not $tag) { $tag = "${{ github.ref_name }}" }
+          if (-not $tag.StartsWith('v')) { throw "Tag must start with v: $tag" }
+          $version = $tag.Substring(1)
+          $declared = (Select-String -Path desktop/app.py -Pattern "APP_VERSION\s*=\s*'([^']+)'").Matches[0].Groups[1].Value
+          if ($version -ne $declared) { throw "Tag $tag does not match APP_VERSION $declared" }
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+          "version=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Verify synchronized version markers
+        run: python scripts/ver_check.py
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Run tests
+        run: python -m pytest -q
+
+      - name: Build executable
+        run: python -m PyInstaller --clean --noconfirm ChatBridge.spec
+
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          python scripts/sync_installer_version.py
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { $iscc = "C:\Program Files\Inno Setup 6\ISCC.exe" }
+          if (-not (Test-Path $iscc)) { throw "ISCC.exe not found" }
+          & $iscc ChatBridge.iss
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed" }
+
+      - name: Collect artifacts
+        shell: pwsh
+        run: |
+          $version = "${{ steps.ver.outputs.version }}"
+          $exe = "dist\ChatBridge-$version.exe"
+          $setup = "installer-output\ChatBridge-Setup-$version.exe"
+          if (-not (Test-Path $exe)) { throw "Missing $exe" }
+          if (-not (Test-Path $setup)) { throw "Missing $setup" }
+          New-Item -ItemType Directory -Force -Path release-assets | Out-Null
+          Copy-Item $exe release-assets/
+          Copy-Item $setup release-assets/
+          Get-FileHash release-assets/* -Algorithm SHA256 |
+            ForEach-Object { "$($_.Hash.ToLower())  $([System.IO.Path]::GetFileName($_.Path))" } |
+            Set-Content release-assets/SHA256SUMS.txt -Encoding utf8
+          Get-ChildItem release-assets | Format-Table Name, Length
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: chatbridge-windows
+          path: release-assets/*
+          if-no-files-found: error
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.ver.outputs.tag }}
+          name: ChatBridge ${{ steps.ver.outputs.version }}
+          draft: false
+          prerelease: ${{ contains(steps.ver.outputs.version, '-') }}
+          generate_release_notes: true
+          files: release-assets/*
+          fail_on_unmatched_files: true
