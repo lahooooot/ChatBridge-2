@@ -296,7 +296,13 @@ class Api:
             self.sink({'type': 'tool_started', 'request_id': rid, 'chat_id': owner.get('chat_id'), **operation})
             if tool == 'run_command':
                 cwd = str(workspace.resolve(args.get('cwd', '.')))
-                terminal_id = self.terminal.run(args['cmd'], cwd, int(args.get('timeout', 300)))
+                cmd = args.get('cmd', args.get('command'))
+                if not isinstance(cmd, str) or not cmd:
+                    raise ValueError("run_command requires a nonempty 'cmd' string")
+                unknown = set(args) - {'cmd', 'command', 'cwd', 'timeout'}
+                if unknown:
+                    raise ValueError('Unknown tool arguments: ' + ', '.join(sorted(unknown)))
+                terminal_id = self.terminal.run(cmd, cwd, int(args.get('timeout', 300)))
                 operation['terminal_id'] = terminal_id
                 self.sink({'type': 'tool_terminal', 'id': ident, 'terminal_id': terminal_id,
                            'request_id': rid, 'chat_id': owner.get('chat_id')})

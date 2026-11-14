@@ -226,8 +226,11 @@ class GitTools:
                     rel = args.get("path")
                     if not isinstance(rel, str) or not rel:
                         raise ValueError("blame needs an explicit path")
-                    paths = self._paths({"path": rel}, repo_root)
-                    return self._run(["blame", "--line-porcelain", "--", *paths])
+                    resolved = self.workspace.resolve(rel)
+                    if resolved.name == ".git" or ".git" in resolved.relative_to(repo_root).parts:
+                        raise PermissionError("Git metadata cannot be blamed")
+                    relative = resolved.relative_to(repo_root).as_posix()
+                    return self._run(["blame", "--line-porcelain", "--", relative])
                 if action == "snapshot":
                     label = args.get("label") or "chatbridge-snapshot"
                     if not isinstance(label, str) or not label.strip() or len(label) > 120 or "\x00" in label:

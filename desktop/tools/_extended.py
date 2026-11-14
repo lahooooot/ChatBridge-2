@@ -24,7 +24,7 @@ def _git(workspace, args, action):
 
 
 def git_status(workspace, args, services):
-    return _git(workspace, {"all": True}, "status")
+    return GitTools(str(workspace.root)).status()
 
 
 def git_diff(workspace, args, services):
@@ -95,6 +95,22 @@ def process_control(workspace, args, services):
     raise ValueError("process_control action must be list, kill, or result")
 
 
+def _python_for(workspace, args):
+    explicit = args.get("python")
+    if explicit is not None:
+        if not isinstance(explicit, str) or not explicit:
+            raise ValueError("python must be a nonempty string")
+        return explicit
+    for candidate in (".venv/Scripts/python.exe", ".venv/bin/python"):
+        try:
+            resolved = workspace.resolve(candidate.replace("\\", "/"))
+        except (PermissionError, ValueError):
+            continue
+        if resolved.is_file():
+            return str(resolved)
+    return "python"
+
+
 def run_tests(workspace, args, services):
     from ..terminal import TerminalManager
     framework = args.get("framework", "auto")
@@ -102,6 +118,7 @@ def run_tests(workspace, args, services):
     extra = args.get("args") or []
     if not isinstance(extra, list) or not all(isinstance(item, str) for item in extra):
         raise ValueError("args must be a list of strings")
+    python = _python_for(workspace, args)
     if framework == "auto":
         if workspace.resolve("pyproject.toml").exists() or workspace.resolve("pytest.ini").exists():
             framework = "pytest"
@@ -114,7 +131,7 @@ def run_tests(workspace, args, services):
         else:
             raise ValueError("Could not auto-detect a test framework; pass framework explicitly")
     commands = {
-        "pytest": ["python", "-m", "pytest", "-q", *extra],
+        "pytest": [python, "-m", "pytest", "-q", *extra],
         "jest": ["npx", "jest", "--silent", *extra],
         "go": ["go", "test", "./...", *extra],
         "cargo": ["cargo", "test", "--quiet", *extra],
