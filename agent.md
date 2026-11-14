@@ -34,6 +34,13 @@ Key locations:
 3. **Editing** — prefer `edit_file` for local edits; it must match exactly
    `count` times (default 1) and returns a unified diff. Use `write_file` only
    to create or replace a whole file.
+3b. **Tool-result ordering (nonce protocol)** — the bridge can deliver results
+   out of order, so never trust a result that doesn't carry the expected token.
+   Give every operation a unique nonce (e.g. `FINISH7Q2`); `run_command` prints
+   it as its first stdout line and report files start with `REPORT-NONCE <nonce>`.
+   Only treat a result as current when the nonce matches; otherwise it is stale.
+   Also: dependent `write_file` -> `run_command` calls must be sent in separate
+   messages (same-message calls run concurrently and can race).
 4. **Reads** — `read_file` accepts `offset`/`limit`; use `tail_file` for logs,
    `outline` for a symbol summary and `find_symbol` before editing.
 5. **Workspace confinement** — all file paths are resolved inside the workspace
