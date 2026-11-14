@@ -1,4 +1,4 @@
-# Implementation API contract — 2.50.0
+# Implementation API contract — 2.60.0
 
 All pywebview Api methods return JSON dictionaries `{ok: true, ...}` or `{ok:false,error: string}`. Async operations return `{ok:true,id}` and deliver completion through drain_events(). Events have a `type` key. The UI must not display raw tool fences; assistant events have `text` sanitized by the Python parser and optional `operations`.
 

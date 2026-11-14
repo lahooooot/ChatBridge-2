@@ -10,7 +10,7 @@ import threading
 from pathlib import Path
 from typing import Any
 
-RULES_VERSION = "2.50.0"
+RULES_VERSION = "2.60.0"
 DATA_DIR_NAME = f".chatbridge-{RULES_VERSION}"
 
 
@@ -18,8 +18,11 @@ def default_data_dir() -> Path:
     """Return the versioned per-user data directory used by the packaged app."""
     return Path.home() / DATA_DIR_NAME
 DEFAULT_RULES = [
-    {"id": "local-tools", "text": "I have a local bridge to my working folder, with read_file, write_file, list_dir, search_files and run_command available. I would like you to use these tools when they help with my request.", "enabled": True, "builtin": True},
+    {"id": "agent-md", "text": "I want you, whenever a project or workspace is attached, to first search for an agent.md file at the workspace root. If agent.md exists, I want its contents treated as part of our working contract and followed for the rest of the session. If agent.md does not exist, I want you to create it and record in it every rule or convention you settle on during the session so future sessions inherit them.", "enabled": True, "builtin": True},
+    {"id": "local-tools", "text": "I have a local bridge to my working folder with read_file, write_file, list_dir, search_files, run_command, edit_file, stat_file, append_file, make_dir, delete_file, rename_file, move_file, copy_file, glob, grep, diff_preview, read_multiple_files, tail_file, outline, find_symbol, git_status, git_diff, git_log, git_show, git_blame, git_stage, git_unstage, git_commit, git_branch, git_checkout, snapshot, rollback, process_control, run_tests and http_fetch available. I would like you to use these tools when they help with my request.", "enabled": True, "builtin": True},
     {"id": "tool-format", "text": 'I can run tool requests written as a JSON object in a chatbridge-tool-call code fence, for example:\n```chatbridge-tool-call\n{"tool":"read_file","args":{"path":"src/app.py"}}\n```\nI can also handle several separate requests in one reply.', "enabled": True, "builtin": True},
+    {"id": "edit-format", "text": "I prefer edit_file with path, search and replace for local edits; it must match the search text exactly count times (default 1). I will use write_file only when you mean to replace or create the whole file.", "enabled": True, "builtin": True},
+    {"id": "read-format", "text": "I understand that read_file accepts optional offset and limit for large files; use tail_file for logs, outline for a symbol summary and find_symbol to locate a definition before editing.", "enabled": True, "builtin": True},
     {"id": "workspace", "text": "I use paths relative to my working folder. I would like you to inspect the relevant files before changing them, and keep changes focused on what I asked for.", "enabled": True, "builtin": True},
     {"id": "write-format", "text": "I can save a file with write_file using path and content, or edit it using path, search and replace. I need the search text to occur exactly once so the edit is unambiguous.", "enabled": True, "builtin": True},
     {"id": "tool-results", "text": "I will send back the real tool results after each request. I would like you to wait for those results, explain any errors honestly, and then continue until you can give me a final answer.", "enabled": True, "builtin": True},

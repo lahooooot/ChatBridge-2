@@ -1,5 +1,5 @@
 {
-  "version": "2.50.0",
+  "version": "2.60.0",
   "transport": "ws://127.0.0.1:8787",
   "client": "internal-browser",
   "authentication": "hello.token must match per-process secret",

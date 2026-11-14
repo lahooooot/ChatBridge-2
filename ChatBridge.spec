@@ -1,4 +1,4 @@
-# ChatBridge 2.50.0 — build on Windows x64 only.
+# ChatBridge 2.60.0 — build on Windows x64 only.
 from pathlib import Path
 from PyInstaller.utils.hooks import collect_all, collect_submodules
 
@@ -25,6 +25,6 @@ a = Analysis([str(root / 'desktop' / 'app.py')], pathex=[str(root)],
              hookspath=[], runtime_hooks=[], excludes=['PyQt5','PyQt6','PySide2','PySide6','tkinter'],
              noarchive=False)
 pyz = PYZ(a.pure)
-exe = EXE(pyz, a.scripts, a.binaries, a.zipfiles, a.datas, name='ChatBridge-2.50.0',
+exe = EXE(pyz, a.scripts, a.binaries, a.zipfiles, a.datas, name='ChatBridge-2.60.0',
           debug=False, bootloader_ignore_signals=False, strip=False, upx=False,
           console=False, icon=str(root / 'icon.ico'))

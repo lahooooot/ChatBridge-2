@@ -1,4 +1,4 @@
-# ChatBridge 2.50.0 validation
+# ChatBridge 2.60.0 validation
 
 ## What was built and checked
 
@@ -34,6 +34,6 @@ The companion browser is a single resource, so queued requests are serialized. I
 
 ## Final automated run
 
-The final pytest run passed **365 tests in 12.03 seconds**, with no failures or warnings. The consolidated check passed Python compilation, all JavaScript `node --check` commands, synchronized 2.50.0 version markers, 143 DOM ID pins, six settings categories, five tool names, six themes, four font sizes, and 207 keys in each locale. The DOM check found no radio inputs, frames, or unsafe HTML sinks.
+The final pytest run passed **365 tests in 12.03 seconds**, with no failures or warnings. The consolidated check passed Python compilation, all JavaScript `node --check` commands, synchronized 2.60.0 version markers, 143 DOM ID pins, six settings categories, five tool names, six themes, four font sizes, and 207 keys in each locale. The DOM check found no radio inputs, frames, or unsafe HTML sinks.
 
 Playwright passed **47/47 page-agent cases** and **15 UI acceptance groups** after the security/lifecycle changes. The consolidated run took the Python suite before one final queued-cancellation regression was added; `pytest-output.txt` records the subsequent 365-test run against the final source. `checks-output.txt` records the complete compiler/DOM/version/Playwright run. The final added native-stop/queued-owner paths also passed their targeted regression run. No Windows installation or signed-in live-site execution is implied by these results.

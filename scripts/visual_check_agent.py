@@ -161,7 +161,7 @@ def platform_send(suite: Suite, platform: str, editable: bool = False) -> None:
     page = suite.page(platform, editable=editable)
     check(api(page, "ping") == "pong", "ping contract")
     meta = api(page, "meta")
-    check(meta["version"] == "2.50.0" and meta["platform"] == platform, "platform metadata", meta)
+    check(meta["version"] == "2.60.0" and meta["platform"] == platform, "platform metadata", meta)
     probe = api(page, "probe")
     check(probe["ready"] and probe["editor_selector"], "editor discovery", probe)
     baseline = api(page, "baseline")

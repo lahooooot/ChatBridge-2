@@ -16,7 +16,7 @@ from .toolparse import parse_tool_calls, has_unterminated
 from .config import DATA_DIR_NAME
 
 log = logging.getLogger(__name__)
-VERSION = '2.50.0'
+VERSION = '2.60.0'
 MAX_TOOL_ROUNDS = 24
 PLATFORM_HOME = {'chatgpt': 'https://chatgpt.com/', 'claude': 'https://claude.ai/',
                  'zai': 'https://chat.z.ai/', 'deepseek': 'https://chat.deepseek.com/',

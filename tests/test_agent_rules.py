@@ -175,5 +175,5 @@ def test_malformed_existing_config_and_state_are_not_silently_replaced(tmp_path)
 
 def test_default_data_dir_is_versioned():
     from desktop.config import DATA_DIR_NAME, default_data_dir
-    assert DATA_DIR_NAME == '.chatbridge-2.50.0'
+    assert DATA_DIR_NAME == '.chatbridge-2.60.0'
     assert default_data_dir().name == DATA_DIR_NAME

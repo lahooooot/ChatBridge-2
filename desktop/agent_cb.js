@@ -1,7 +1,7 @@
 /* ChatBridge page agent. DOM only: the Python driver owns capture and tool parsing. */
 (() => {
   'use strict';
-  const VER = '2.50.0';
+  const VER = '2.60.0';
   // All site-specific selectors live here. Never use generated build-hash classes.
   const HINTS = {
     common: {

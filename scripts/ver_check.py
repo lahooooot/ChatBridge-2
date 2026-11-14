@@ -4,7 +4,7 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = '2.50.0'
+VERSION = '2.60.0'
 CHECKS = {
     'desktop/app.py': r"APP_VERSION\s*=\s*['\"]([^'\"]+)",
     'desktop/agent_cb.js': r"VER\s*=\s*['\"]([^'\"]+)",

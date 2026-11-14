@@ -30,7 +30,7 @@ Where it installs:
 |------|----------|
 | Program files | `%LOCALAPPDATA%\Programs\ChatBridge` |
 | Start Menu shortcut | Start Menu → ChatBridge |
-| Your data (config, logs, WebView2 profile) | `%USERPROFILE%\.chatbridge-2.50.0` |
+| Your data (config, logs, WebView2 profile) | `%USERPROFILE%\.chatbridge-2.60.0` |
 
 ## Portable option (no installation)
 
@@ -40,7 +40,7 @@ If you do not want to install anything:
 2. Put it anywhere you like.
 3. Double-click it to run.
 
-Portable mode uses the same `%USERPROFILE%\.chatbridge-2.50.0` folder for
+Portable mode uses the same `%USERPROFILE%\.chatbridge-2.60.0` folder for
 its data, so switching between portable and installed builds keeps your
 settings.
 
@@ -60,7 +60,7 @@ They must be identical (case-insensitive).
 ## Upgrade to a newer version
 
 Run the new installer over the old one. It replaces the program files
-and keeps your data in `%USERPROFILE%\.chatbridge-2.50.0` untouched.
+and keeps your data in `%USERPROFILE%\.chatbridge-2.60.0` untouched.
 
 To keep two versions side by side, use the portable executable for the
 second copy.
@@ -70,7 +70,7 @@ second copy.
 Windows Settings → Apps → Installed apps → ChatBridge → Uninstall.
 
 Uninstalling removes the program files and shortcuts. Your data folder
-`%USERPROFILE%\.chatbridge-2.50.0` is **kept on purpose** so a reinstall
+`%USERPROFILE%\.chatbridge-2.60.0` is **kept on purpose** so a reinstall
 picks up where you left off. Delete that folder by hand if you want a
 clean slate.
 

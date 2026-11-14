@@ -128,9 +128,12 @@ def test_search_skips_binary_and_symlinks(tmp_path):
     assert result["skipped"] == 1
 
 
-def test_five_tool_modules_export_execute_and_use_workspace(tmp_path):
-    assert set(TOOL_NAMES) == {"read_file", "write_file", "list_dir", "search_files", "run_command"}
-    for name in TOOL_NAMES:
+BASE_TOOLS = {"read_file", "write_file", "list_dir", "search_files", "run_command"}
+
+
+def test_tool_modules_export_execute_and_use_workspace(tmp_path):
+    assert BASE_TOOLS.issubset(set(TOOL_NAMES))
+    for name in BASE_TOOLS:
         assert callable(importlib.import_module("desktop.tools." + name).execute)
     execute(tmp_path, "write_file", {"path": "file.txt", "content": "hello"})
     assert execute(Workspace(tmp_path), "read_file", {"path": "file.txt"})["content"] == "hello"

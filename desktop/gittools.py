@@ -212,6 +212,42 @@ class GitTools:
                     if args.get("create") or action == "branch":
                         return self._run(["switch", "-c", name])
                     return self._run(["switch", "--", name])
+                if action == "log":
+                    limit = args.get("limit", 50)
+                    if type(limit) is not int or not 1 <= limit <= 500:
+                        raise ValueError("limit must be an integer between 1 and 500")
+                    return self._run(["log", "--no-color", "--format=%H%x09%an%x09%aI%x09%s", f"-n{limit}", "--"])
+                if action == "show":
+                    ref = args.get("ref", "HEAD")
+                    if not isinstance(ref, str) or not ref or ref.startswith("-") or "\x00" in ref:
+                        raise ValueError("A valid Git ref is required")
+                    return self._run(["show", "--no-color", "--stat", "--patch", ref])
+                if action == "blame":
+                    rel = args.get("path")
+                    if not isinstance(rel, str) or not rel:
+                        raise ValueError("blame needs an explicit path")
+                    paths = self._paths({"path": rel}, repo_root)
+                    return self._run(["blame", "--line-porcelain", "--", *paths])
+                if action == "snapshot":
+                    label = args.get("label") or "chatbridge-snapshot"
+                    if not isinstance(label, str) or not label.strip() or len(label) > 120 or "\x00" in label:
+                        raise ValueError("snapshot label must be a short nonempty string")
+                    has_head = self._run(["rev-parse", "--verify", "HEAD"])["ok"]
+                    if has_head:
+                        created = self._run(["stash", "create", label])
+                    else:
+                        created = self._run(["stash", "create", label], allowed=(0,))
+                    sha = created["stdout"].strip().splitlines()[-1] if created["stdout"].strip() else ""
+                    return {"ok": created["ok"], "label": label, "stash_sha": sha, "stdout": created["stdout"], "stderr": created["stderr"], "exit": created["exit"]}
+                if action == "rollback":
+                    sha = args.get("sha")
+                    if not isinstance(sha, str) or not re.fullmatch(r"[0-9a-fA-F]{7,64}", sha):
+                        raise ValueError("rollback needs a valid stash sha")
+                    applied = self._run(["stash", "apply", sha])
+                    if not applied["ok"]:
+                        return applied
+                    dropped = self._run(["stash", "drop", sha], allowed=(0, 1))
+                    return {"ok": True, "applied": sha, "stdout": applied["stdout"], "stderr": applied["stderr"] + dropped["stderr"], "exit": applied["exit"]}
                 raise ValueError(f"Unknown Git action: {action}")
         except (ValueError, PermissionError, OSError, TypeError) as exc:
             return {"ok": False, "error": str(exc)}

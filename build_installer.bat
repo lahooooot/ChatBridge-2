@@ -1,7 +1,7 @@
 @echo off
 setlocal
 cd /d "%~dp0"
-set APP_VERSION=2.50.1
+set APP_VERSION=2.60.0
 call build_exe.bat
 if errorlevel 1 exit /b 1
 ".venv\Scripts\python.exe" scripts\sync_installer_version.py

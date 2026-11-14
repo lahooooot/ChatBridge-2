@@ -1,6 +1,6 @@
 [project]
 name = "chatbridge"
-version = "2.50.0"
+version = "2.60.0"
 description = "Windows desktop bridge for browser-based AI chats"
 requires-python = ">=3.10"
 

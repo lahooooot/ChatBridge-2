@@ -10,3 +10,7 @@ installer-output/
 instance.lock
 .env
 *.log
+.idea/
+*.bak
+*.bak[0-9]*
+*.nav.bak

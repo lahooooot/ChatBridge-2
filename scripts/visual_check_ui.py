@@ -24,7 +24,7 @@ MOCK = r"""
   const record = (method,args) => window.__calls.push({method,args});
   const event = value => setTimeout(() => window.__events.push(value),45);
   const api = {
-    async bootstrap(){return {ok:true,version:'2.50.0',config:{full_access:true,custom_models:[],agent_rules:window.__mockRules,agent_rules_on:true,updates_seen:false},state:{active_chat_id:'c1',chats:[{id:'c1',title:'Workspace check',platform:'chatgpt',messages:[],project:{id:'p1',name:'sample-project',path:'/mock/project',branch:'main'}}]},status:{connected:false},provider:{enabled:false,port:8788,key:'test-key'}};},
+    async bootstrap(){return {ok:true,version:'2.60.0',config:{full_access:true,custom_models:[],agent_rules:window.__mockRules,agent_rules_on:true,updates_seen:false},state:{active_chat_id:'c1',chats:[{id:'c1',title:'Workspace check',platform:'chatgpt',messages:[],project:{id:'p1',name:'sample-project',path:'/mock/project',branch:'main'}}]},status:{connected:false},provider:{enabled:false,port:8788,key:'test-key'}};},
     async drain_events(){const events=window.__events.splice(0);return {ok:true,events};},
     async state_save(state){record('state_save',[state]);return {ok:true};},
     async config_set(patch){record('config_set',[patch]);return {ok:true,config:patch};},

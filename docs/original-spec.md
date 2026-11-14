@@ -1,10 +1,10 @@
-# پرامپت دقیق طراحی و ساخت ChatBridge — نسخهٔ 2.50.0
+# پرامپت دقیق طراحی و ساخت ChatBridge — نسخهٔ 2.60.0
 
 ## ۰) نقش، مأموریت، و حقِ خلاقیت تو
 
 تو یک تیم توسعهٔ کامل هستی در یک نفر: مهندس دسکتاپ ویندوز (Python + pywebview + WebView2 + Win32)، توسعه‌دهندهٔ فرانت‌اند (HTML/CSS/JS خالص، RTL)، و مهندس ساخت/نصب.
 
-مأموریت: طراحی و ساخت **ChatBridge نسخهٔ 2.50.0** دقیقاً طبق این مشخصات.
+مأموریت: طراحی و ساخت **ChatBridge نسخهٔ 2.60.0** دقیقاً طبق این مشخصات.
 
  «این متن، پیشنهادِ من است — اگر فکر می‌کنی بهتر از این هم می‌شود پیاده‌سازی کرد، انجامش بده. در همهٔ بخش‌ها می‌توانی نظر بدهی، خلاقیت به خرج بدهی و بهترش کنی.» یعنی:
 - هر جزء این سند **پیشنهاد** است، نه زنجیر؛ جزئیات پیاده‌سازی آزاد است و راهِ هوشمندانه‌تر را انتخاب کن.
@@ -445,7 +445,7 @@ chatbridge-tool-result
 
 ## ۱۴) نسخه‌بندی و ساخت/نصب
 
-- نسخهٔ اپ: **2.50.0** — یکسان در: `app.py` (APP_VERSION) ، `index.html` ، `shared/protocol.json` ، `agent_cb.js` (VER) ، READMEها ، `ChatBridge.iss` ، `ChatBridge.spec` ، `build_installer.bat` (sweep با `scripts/ver_*.py` + `sync_installer_version.py`).
+- نسخهٔ اپ: **2.60.0** — یکسان در: `app.py` (APP_VERSION) ، `index.html` ، `shared/protocol.json` ، `agent_cb.js` (VER) ، READMEها ، `ChatBridge.iss` ، `ChatBridge.spec` ، `build_installer.bat` (sweep با `scripts/ver_*.py` + `sync_installer_version.py`).
 - نسبت به 2.49/2.48: **اکستنشن و انتخابِ روش حذف**؛ پارسرِ قرارداد به پایتون (`toolparse.py`) منتقل شد؛ **تبِ فایل‌ها (درخت + ویرایشگر) اضافه**؛ قوانینِ DOMِ پنج پلتفرم به‌صورت کامل در `agent_cb.js` تمرکز یافت؛ بقیه = رفتارِ تست‌شدهٔ 2.48.
 - `ChatBridge.bat` (اجرای سورس) ؛ `build_exe.bat` → `dist\ChatBridge\ChatBridge.exe` ؛ `build_installer.bat` → `installer-output\ChatBridge-Setup-2.50.0.exe` ؛ آیکن `icon.ico`.
 

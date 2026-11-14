@@ -61,7 +61,7 @@ def main():
     assert 'iframe' not in doc.tags, 'Embedded third-party frames are forbidden'
     assert doc.categories == {'general', 'appearance', 'models', 'internal-browser', 'provider', 'agent-rules'}
     assert doc.tabs == {'browser', 'files', 'terminal', 'git', 'file'}
-    assert '2.50.0' in html and '<html lang="en" dir="ltr"' in html
+    assert '2.60.0' in html and '<html lang="en" dir="ltr"' in html
     assert not re.search(r'browser_mode|chrome\.|extension/', html + js, re.I)
     assert not re.search(r'\.innerHTML\s*=|insertAdjacentHTML|document\.write\(|\beval\(', js)
     assert '__cbIbDockRect' in js and '__cbOpenInternalBrowser' in js

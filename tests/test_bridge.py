@@ -15,7 +15,7 @@ def bridge():
 
 
 async def hello(ws, bridge, token=None):
-    await ws.send(json.dumps({'type': 'hello', 'version': '2.50.0', 'agent': 'internal-browser',
+    await ws.send(json.dumps({'type': 'hello', 'version': '2.60.0', 'agent': 'internal-browser',
                               'token': token if token is not None else bridge.token}))
     return json.loads(await ws.recv())
 
@@ -26,7 +26,7 @@ async def test_single_client_and_reclaim(bridge):
     async with websockets.connect(url) as first:
         assert (await hello(first, bridge))['ready']
         async with websockets.connect(url) as second:
-            await second.send(json.dumps({'type': 'hello', 'version': '2.50.0', 'agent': 'internal-browser', 'token': bridge.token}))
+            await second.send(json.dumps({'type': 'hello', 'version': '2.60.0', 'agent': 'internal-browser', 'token': bridge.token}))
             with pytest.raises(websockets.ConnectionClosed) as exc:
                 await second.recv()
             assert exc.value.rcvd.code == 4009

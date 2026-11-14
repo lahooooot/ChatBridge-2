@@ -5,7 +5,7 @@ from desktop.app import Api, decode_data, data_url
 def test_bootstrap_without_native_dependencies(tmp_path):
     api = Api(tmp_path/'data')
     boot = api.bootstrap()
-    assert boot['ok'] and boot['version'] == '2.50.0'
+    assert boot['ok'] and boot['version'] == '2.60.0'
     assert len(boot['platforms']) == 5
     assert not boot['status']['connected']
     assert boot['config']['full_access']

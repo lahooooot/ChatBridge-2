@@ -12,7 +12,7 @@
   ];
   const builtinRules = [
     {id:'local-workspace',builtin:true,enabled:true,text:'I have a local workspace connected to this conversation. You can ask to read or update files there, list folders, search files, and run commands when that helps with my request.'},
-    {id:'tool-format',builtin:true,enabled:true,text:'When you need a local action, please put a JSON object with tool and args in a fenced code block labeled chatbridge-tool-call. The available names are read_file, write_file, list_dir, search_files, and run_command.'},
+    {id:'tool-format',builtin:true,enabled:true,text:'When you need a local action, please put a JSON object with tool and args in a fenced code block labeled chatbridge-tool-call. Available names include read_file, write_file, list_dir, search_files, run_command, edit_file, stat_file, append_file, make_dir, delete_file, rename_file, move_file, copy_file, glob, grep, diff_preview, read_multiple_files, tail_file, outline, find_symbol, git_status, git_diff, git_log, git_show, git_blame, git_stage, git_unstage, git_commit, git_branch, git_checkout, snapshot, rollback, process_control, run_tests, and http_fetch.'},
     {id:'results',builtin:true,enabled:true,text:'I will send back the actual result of each local action. Please wait for it before describing what happened, and use paths relative to my workspace.'},
     {id:'safety',builtin:true,enabled:true,text:'I prefer small, targeted edits and clear explanations before potentially destructive changes. If an action fails, please explain the error and try a practical alternative.'}
   ];
@@ -35,7 +35,7 @@
   const copy = value => JSON.parse(JSON.stringify(value));
   // The preview adapter only implements local preferences; live features return honest errors.
   const previewApi = {
-    async bootstrap(){return {ok:true,version:'2.50.0',config:readLocal('cb.preview.config',config),state:readLocal('cb.preview.state',{}),platforms:homes,status:{connected:false},provider:{enabled:false,port:8788,key:''}};},
+    async bootstrap(){return {ok:true,version:'2.60.0',config:readLocal('cb.preview.config',config),state:readLocal('cb.preview.state',{}),platforms:homes,status:{connected:false},provider:{enabled:false,port:8788,key:''}};},
     async drain_events(){return {ok:true,events:[]};},
     async state_save(value){writeLocal('cb.preview.state',value);return {ok:true};},
     async config_set(patch){config={...config,...patch};writeLocal('cb.preview.config',config);return {ok:true,config};},
@@ -223,7 +223,7 @@
       const p=node('p');inline(p,paragraph.join('\n'));frag.append(p);
     }return frag;
   }
-  const verbs={read_file:'read',write_file:'write',run_command:'run',search_files:'grep',list_dir:'list'};
+  const verbs={read_file:'read',write_file:'write',run_command:'run',search_files:'grep',list_dir:'list',edit_file:'edit',stat_file:'stat',append_file:'append',make_dir:'mkdir',delete_file:'delete',rename_file:'move',move_file:'move',copy_file:'copy',glob:'glob',grep:'grep',diff_preview:'diff',read_multiple_files:'read',tail_file:'tail',outline:'outline',find_symbol:'find',git_status:'git',git_diff:'git',git_log:'git',git_show:'git',git_blame:'git',git_stage:'git',git_unstage:'git',git_commit:'git',git_branch:'git',git_checkout:'git',snapshot:'snapshot',rollback:'rollback',process_control:'process',run_tests:'test',http_fetch:'fetch'};
   function validOperation(op){return op && /^[\w.:-]{1,64}$/.test(op.tool || op.name || '') && (op.tool || op.name)!=='__parse_error__';}
   function opRow(op) {
     const tool=op.tool || op.name,args=op.args || {},result=op.result || {};const verb=op.verb || (tool==='write_file'&&args.search!==undefined?'edit':verbs[tool] || 'tool');
@@ -262,25 +262,33 @@
     if(m.operations?.length)article.append(renderOperations(m.operations));
     if(m.files?.length){const files=node('div',undefined,'message-files');m.files.forEach(f=>{const wrap=node('div',undefined,'message-file');if(f.image&&(f.data_url||safeUrl(f.url,true))){const img=node('img');img.src=f.data_url || safeUrl(f.url,true);img.alt=f.name || '';wrap.append(img);}else if(f.data_url&&/^text\//.test(f.mime||'')){const pre=node('pre',t('loading_file'),'file-preview');wrap.append(pre);fetch(f.data_url).then(r=>r.text()).then(text=>{pre.textContent=text;}).catch(()=>{pre.textContent=t('file_unavailable');});}const button=node('button',undefined,'file-chip');button.append(node('span',f.image?'▧':'⤓'));button.title=f.name || t('file_download');button.setAttribute('aria-label',f.name || t('file_download'));button.addEventListener('click',()=>downloadFile(f,m.platform || platform()).catch(()=>{}));wrap.append(button);files.append(wrap);});article.append(files);}return article;
   }
-  let navObserver=null;
+  let navObserver=null,navAnchor=null,navChatId=null,navCount=0;const NAV_WINDOW=8;
   function renderChatNav(c) {
     const nav=$('chatNav');if(!nav)return;nav.replaceChildren();
     if(navObserver){navObserver.disconnect();navObserver=null;}
     const userMsgs=(c?.messages || []).filter(m=>m.role==='user' && m.id);
+    const cid=c?.id||null;
+    if(cid!==navChatId||userMsgs.length!==navCount){navAnchor=null;navChatId=cid;navCount=userMsgs.length;}
     if(userMsgs.length<2)return;
+    let anchorIdx=userMsgs.length-1;
+    if(navAnchor){const idx=userMsgs.findIndex(m=>m.id===navAnchor);if(idx>=0)anchorIdx=idx;else navAnchor=null;}
+    const start=Math.max(0,anchorIdx-NAV_WINDOW),end=anchorIdx,fa=state.language==='fa';
     navObserver=new IntersectionObserver((entries)=>{
       entries.forEach(entry=>{
         const dot=document.getElementById('nav-'+entry.target.dataset.messageId);
         if(dot)dot.classList.toggle('active',entry.isIntersecting);
       });
     },{root:$('chatStream'),rootMargin:'-20% 0px -60% 0px',threshold:0});
-    userMsgs.forEach((m,i)=>{
+    if(start>0){const up=node('button','↑','chat-nav-arrow');up.type='button';up.title=fa?'پیام‌های قدیمی‌تر':'Older messages';up.addEventListener('click',()=>{navAnchor=userMsgs[Math.max(NAV_WINDOW,anchorIdx-NAV_WINDOW)].id;renderChatNav(c);});nav.append(up);}
+    userMsgs.slice(start,end).forEach((m,k)=>{
+      const i=start+k;
       const dot=node('div',undefined,'chat-nav-dot');dot.id='nav-'+m.id;
       dot.title=(m.text||'').slice(0,80)||('Message '+(i+1));
-      dot.addEventListener('click',()=>{const el=document.getElementById('msg-'+m.id);if(el){el.scrollIntoView({behavior:'smooth',block:'start'});}});
+      dot.addEventListener('click',()=>{navAnchor=m.id;renderChatNav(c);const el=document.getElementById('msg-'+m.id);if(el){el.scrollIntoView({behavior:'smooth',block:'start'});}});
       nav.append(dot);
       const target=document.getElementById('msg-'+m.id);if(target)navObserver.observe(target);
     });
+    if(end<userMsgs.length-1){const down=node('button','↓','chat-nav-arrow');down.type='button';down.title=fa?'پیام‌های جدیدتر':'Newer messages';down.addEventListener('click',()=>{navAnchor=userMsgs[Math.min(userMsgs.length-1,anchorIdx+NAV_WINDOW)].id;renderChatNav(c);});nav.append(down);}
   }
   function renderStream() {
     const c=chat(),stream=$('chatStream');const atBottom=stream.scrollHeight-stream.clientHeight-stream.scrollTop<100;

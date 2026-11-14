@@ -1,4 +1,4 @@
-"""ChatBridge 2.50.0 entry point and pywebview API."""
+"""ChatBridge 2.60.0 entry point and pywebview API."""
 from __future__ import annotations
 import base64
 import functools
@@ -33,9 +33,22 @@ from .audit import AuditLog
 from .internal_browser import InternalBrowser, PLATFORM_HOME, profile_path
 from .provider_server import ProviderServer
 from .toolparse import parse_tool_calls, strip_tool_blocks
+from .tools._extended import HANDLERS as EXTENDED_TOOLS
 
-APP_VERSION = '2.50.0'
-TOOLS = ('read_file', 'write_file', 'list_dir', 'search_files', 'run_command')
+APP_VERSION = '2.60.0'
+WORKSPACE_TOOLS = (
+    'read_file', 'write_file', 'list_dir', 'search_files', 'run_command',
+    'edit_file', 'stat_file', 'append_file', 'make_dir', 'delete_file',
+    'rename_file', 'move_file', 'copy_file', 'glob', 'grep', 'diff_preview',
+    'read_multiple_files', 'tail_file', 'outline', 'find_symbol',
+)
+TOOLS = WORKSPACE_TOOLS + tuple(EXTENDED_TOOLS)
+APPROVAL_TOOLS = frozenset({
+    'write_file', 'run_command', 'edit_file', 'append_file', 'make_dir',
+    'delete_file', 'rename_file', 'move_file', 'copy_file',
+    'git_stage', 'git_unstage', 'git_commit', 'git_checkout',
+    'snapshot', 'rollback', 'run_tests', 'http_fetch', 'process_control',
+})
 MAX_FILE = 15 * 1024 * 1024
 log = logging.getLogger(__name__)
 
@@ -218,7 +231,17 @@ class Api:
     def _operation(call):
         tool, args = call.get('tool'), call.get('args', {})
         verbs = {'read_file': 'read', 'write_file': 'edit' if 'search' in args else 'write',
-                 'list_dir': 'list', 'search_files': 'grep', 'run_command': 'run'}
+                 'list_dir': 'list', 'search_files': 'grep', 'run_command': 'run',
+                 'edit_file': 'edit', 'stat_file': 'stat', 'append_file': 'append',
+                 'make_dir': 'mkdir', 'delete_file': 'delete', 'rename_file': 'move',
+                 'move_file': 'move', 'copy_file': 'copy', 'glob': 'glob',
+                 'grep': 'grep', 'diff_preview': 'diff', 'read_multiple_files': 'read',
+                 'tail_file': 'tail', 'outline': 'outline', 'find_symbol': 'find',
+                 'git_status': 'git', 'git_diff': 'git', 'git_log': 'git',
+                 'git_show': 'git', 'git_blame': 'git', 'git_stage': 'git',
+                 'git_unstage': 'git', 'git_commit': 'git', 'git_branch': 'git',
+                 'git_checkout': 'git', 'snapshot': 'snapshot', 'rollback': 'rollback',
+                 'process_control': 'process', 'run_tests': 'test', 'http_fetch': 'fetch'}
         return {'id': call['id'], 'tool': tool, 'verb': verbs.get(tool, 'tool'),
                 'target': str(args.get('path', args.get('cmd', args.get('query', tool)))), 'args': args,
                 'status': 'pending'}
@@ -266,7 +289,7 @@ class Api:
             if not root:
                 raise ValueError('No workspace is attached; ask me to attach a project first.')
             workspace = Workspace(root)
-            if tool in ('write_file', 'run_command') and not self._approve(ident, tool, args, rid):
+            if tool in APPROVAL_TOOLS and not self._approve(ident, tool, args, rid):
                 raise PermissionError('Approval denied or timed out')
             if self.requests.get(rid, {}).get('stopped'):
                 return
@@ -286,6 +309,8 @@ class Api:
                         self.terminal.kill(terminal_id)
                         return
                     time.sleep(0.1)
+            elif tool in EXTENDED_TOOLS:
+                result = EXTENDED_TOOLS[tool](workspace, args, self)
             else:
                 result = getattr(workspace, tool)(**args)
             ok = True
@@ -297,8 +322,9 @@ class Api:
             log.exception('Audit recording failed')
         operation.update(status='done' if ok else 'error', ok=ok, result=result, error=error)
         self.sink({'type': 'tool_finished', 'request_id': rid, 'chat_id': owner.get('chat_id'), **operation})
-        if ok and tool == 'write_file':
-            self.sink({'type': 'fs_changed', 'path': args.get('path'), 'request_id': rid})
+        if ok and tool in {'write_file', 'edit_file', 'append_file', 'make_dir', 'delete_file',
+                           'rename_file', 'move_file', 'copy_file'}:
+            self.sink({'type': 'fs_changed', 'path': args.get('path') or args.get('new_path'), 'request_id': rid})
         if owner.get('stopped'):
             return
         packet = {'type': 'tool_result', 'id': ident, 'ok': ok, 'result': result, 'error': error,
