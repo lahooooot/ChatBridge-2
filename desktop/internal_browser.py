@@ -29,10 +29,44 @@ def same_conversation(a, b):
         urlparse(a).path.rstrip('/').split('/')[-1] == urlparse(b).path.rstrip('/').split('/')[-1])
 
 
+def _legacy_webview_profiles(base: Path) -> list[Path]:
+    """Return version-suffixed WebView2 profile dirs from older builds, newest first."""
+    import re as _re
+    pattern = _re.compile(r'^\.chatbridge-\d+\.\d+\.\d+$')
+    try:
+        entries = [entry for entry in base.iterdir() if entry.is_dir() and pattern.match(entry.name)]
+    except OSError:
+        return []
+    return sorted(entries, key=lambda entry: entry.name, reverse=True)
+
+
+def _migrate_webview_profile(target: Path) -> None:
+    """One-time copy of the newest legacy WebView2 login profile.
+
+    Copy (never move) so a failed upgrade keeps the old login data intact.
+    """
+    import shutil
+    if target.exists() and any(target.iterdir() if target.is_dir() else []):
+        return
+    legacy = _legacy_webview_profiles(target.parent)
+    if not legacy:
+        return
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(legacy[0], target, dirs_exist_ok=True)
+    except OSError:
+        return
+
+
 def profile_path():
     if os.name == 'nt':
-        return Path(os.environ.get('LOCALAPPDATA', str(Path.home()))) / 'ChatBridge' / DATA_DIR_NAME.lstrip('.') / 'WebView2'
-    return Path.home() / DATA_DIR_NAME / 'WebView2'
+        base = Path(os.environ.get('LOCALAPPDATA', str(Path.home()))) / 'ChatBridge'
+        target = base / DATA_DIR_NAME.lstrip('.') / 'WebView2'
+        _migrate_webview_profile(target)
+        return target
+    target = Path.home() / DATA_DIR_NAME / 'WebView2'
+    _migrate_webview_profile(target)
+    return target
 
 
 class NativeDock:

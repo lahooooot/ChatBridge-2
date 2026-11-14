@@ -4,19 +4,59 @@ from __future__ import annotations
 import copy
 import json
 import os
+import re
 import secrets
+import shutil
 import tempfile
 import threading
 from pathlib import Path
 from typing import Any
 
 RULES_VERSION = "2.60.0"
-DATA_DIR_NAME = f".chatbridge-{RULES_VERSION}"
+# The data directory is intentionally NOT version-suffixed: settings, chat
+# history, the audit log and the WebView2 login profile must survive upgrades.
+# RULES_VERSION still versions the built-in agent rules for migrations.
+DATA_DIR_NAME = ".chatbridge"
+_LEGACY_RE = re.compile(r"^\.chatbridge-\d+\.\d+\.\d+$")
+
+
+def _legacy_data_dirs(home: Path) -> list[Path]:
+    """Return version-suffixed data dirs (newest-looking first) from older builds."""
+    try:
+        candidates = [entry for entry in home.iterdir()
+                      if entry.is_dir() and _LEGACY_RE.match(entry.name)]
+    except OSError:
+        return []
+    return sorted(candidates, key=lambda entry: entry.name, reverse=True)
+
+
+def _migrate_legacy_data(target: Path) -> None:
+    """One-time copy of the newest legacy versioned data dir into `target`.
+
+    Copy (never move) so a failed upgrade leaves the old directory intact.
+    Existing files in the target are never overwritten.
+    """
+    if target.exists() and any(target.iterdir() if target.is_dir() else []):
+        return
+    legacy = _legacy_data_dirs(target.parent)
+    if not legacy:
+        return
+    source = legacy[0]
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(source, target, dirs_exist_ok=True)
+    except OSError:
+        # A failed migration must not block startup; the app falls back to a
+        # fresh data directory, exactly as older builds did.
+        return
 
 
 def default_data_dir() -> Path:
-    """Return the versioned per-user data directory used by the packaged app."""
-    return Path.home() / DATA_DIR_NAME
+    """Return the stable per-user data directory used by the packaged app."""
+    home = Path.home()
+    target = home / DATA_DIR_NAME
+    _migrate_legacy_data(target)
+    return target
 DEFAULT_RULES = [
     {"id": "agent-md", "text": "I want you, whenever a project or workspace is attached, to first search for an agent.md file at the workspace root. If agent.md exists, I want its contents treated as part of our working contract and followed for the rest of the session. If agent.md does not exist, I want you to create it and record in it every rule or convention you settle on during the session so future sessions inherit them.", "enabled": True, "builtin": True},
     {"id": "local-tools", "text": "I have a local bridge to my working folder with read_file, write_file, list_dir, search_files, run_command, edit_file, stat_file, append_file, make_dir, delete_file, rename_file, move_file, copy_file, glob, grep, diff_preview, read_multiple_files, tail_file, outline, find_symbol, git_status, git_diff, git_log, git_show, git_blame, git_stage, git_unstage, git_commit, git_branch, git_checkout, snapshot, rollback, process_control, run_tests and http_fetch available. I would like you to use these tools when they help with my request.", "enabled": True, "builtin": True},

@@ -173,7 +173,20 @@ def test_malformed_existing_config_and_state_are_not_silently_replaced(tmp_path)
         store.load_state()
 
 
-def test_default_data_dir_is_versioned():
+def test_default_data_dir_is_stable():
     from desktop.config import DATA_DIR_NAME, default_data_dir
-    assert DATA_DIR_NAME == '.chatbridge-2.60.0'
+    assert DATA_DIR_NAME == '.chatbridge'
     assert default_data_dir().name == DATA_DIR_NAME
+
+
+def test_default_data_dir_migrates_legacy_versioned_dir(tmp_path, monkeypatch):
+    import desktop.config as config
+    monkeypatch.setattr(config.Path, 'home', staticmethod(lambda: tmp_path))
+    legacy = tmp_path / '.chatbridge-2.50.0'
+    legacy.mkdir()
+    (legacy / 'config.json').write_text('{"full_access": false}', encoding='utf-8')
+    target = config.default_data_dir()
+    assert target == tmp_path / '.chatbridge'
+    assert (target / 'config.json').read_text(encoding='utf-8') == '{"full_access": false}'
+    # The legacy directory is copied, never moved or deleted.
+    assert legacy.exists()

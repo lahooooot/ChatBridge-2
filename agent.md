@@ -53,6 +53,12 @@ Key locations:
 8. **Documentation** — user-facing changes update `README.md`; the HTML guide
    is regenerated with `python scripts/render_readme.py`; user-visible changes
    get a `CHANGELOG.md` entry under the current version.
+9. **Data directory is stable** — user data lives in `%USERPROFILE%\.chatbridge`
+   (not version-suffixed). `RULES_VERSION` in `desktop/config.py` still versions
+   the built-in agent rules only. On first launch, `default_data_dir()` and
+   `profile_path()` copy the newest legacy `.chatbridge-X.Y.Z` folder (app data
+   and WebView2 profile) into the stable folder. Copy, never move; the legacy
+   folder is kept as a backup. Do not reintroduce version-suffixed data dirs.
 
 ## Session log
 
@@ -68,6 +74,11 @@ Key locations:
   `_git(..., "status")`, but `GitTools.action()` has no `status` case (that is a
   separate method), so every `git_status` call returned `Unknown Git action:
   status`. It now calls `GitTools(root).status()` directly.
+- 2026-11-14 — made the data directory stable across upgrades. `DATA_DIR_NAME`
+  is now `.chatbridge` (was `.chatbridge-2.60.0`); `default_data_dir()` and
+  `profile_path()` copy the newest legacy versioned folder once on first launch
+  so settings, history and model logins survive. Added a migration test; full
+  suite green (376 passed, 5 skipped).
 - 2026-11-14 — fixed the opaque `'cmd'` error from `run_command`: the
   `run_command` branch in `desktop/app.py` read `args['cmd']` directly (a bare
   `KeyError: 'cmd'` surfaced before the tool's own validation). It now accepts

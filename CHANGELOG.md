@@ -47,6 +47,12 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
   `APP_VERSION` and `scripts/ver_check.py` enforces the rest.
 
 ### Fixed
+- Upgrades no longer wipe settings, chat history and saved model logins.
+  User data now lives in a stable `%USERPROFILE%\.chatbridge` folder
+  instead of a version-suffixed `.chatbridge-X.Y.Z` one. On first launch
+  after upgrading, the newest versioned folder is copied into the stable
+  folder (the old folder is kept as a backup), for both app data and the
+  WebView2 login profile.
 - Explanatory prose was deleted whenever a tool-call fence was followed
   by text on the same line as the closing fence. Fixed in both the
   Python parser (`desktop/toolparse.py`) and the UI stripper
