@@ -1,0 +1,4 @@
+To https://github.com/lahooooot/ChatBridge-2.git
+   dfacffe..29b82d2  main -> main
+To https://github.com/lahooooot/ChatBridge-2.git
+ * [new tag]         v2.70.0 -> v2.70.0

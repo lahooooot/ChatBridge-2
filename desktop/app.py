@@ -1,4 +1,4 @@
-"""ChatBridge 2.70.0 entry point and pywebview API."""
+"""ChatBridge 2.71.0 entry point and pywebview API."""
 from __future__ import annotations
 import base64
 import functools
@@ -34,8 +34,9 @@ from .internal_browser import InternalBrowser, PLATFORM_HOME, profile_path
 from .provider_server import ProviderServer
 from .toolparse import parse_tool_calls, strip_tool_blocks
 from .tools._extended import HANDLERS as EXTENDED_TOOLS
+from . import updater
 
-APP_VERSION = '2.70.0'
+APP_VERSION = '2.71.0'
 WORKSPACE_TOOLS = (
     'read_file', 'write_file', 'list_dir', 'search_files', 'run_command',
     'edit_file', 'stat_file', 'append_file', 'make_dir', 'delete_file',
@@ -461,6 +462,38 @@ class Api:
         if config.get('ws_port') != old.get('ws_port'):
             self.sink({'type': 'notice', 'text': 'Restart ChatBridge to apply the WebSocket port change.'})
         return {'ok': True, 'config': config}
+
+    @guarded
+    def update_check(self):
+        """Ask GitHub for the latest release and compare it to APP_VERSION."""
+        result = updater.check_for_update(APP_VERSION)
+        if result.get('ok'):
+            result['auto'] = bool(self.config.get().get('auto_update', True))
+        return result
+
+    @guarded
+    def update_apply(self, asset_url='', asset_name=''):
+        """Download and stage a portable EXE, then relaunch into it."""
+        if not asset_url:
+            check = updater.check_for_update(APP_VERSION)
+            asset = (check.get('asset') or {}) if check.get('ok') else {}
+            asset_url = asset.get('url') or ''
+            asset_name = asset.get('name') or ''
+        result = updater.apply_update(asset_url, asset_name)
+        if result.get('ok'):
+            log.info('Update staged from %s; restarting to apply', asset_url)
+            threading.Timer(1.2, self._relaunch_for_update).start()
+        return result
+
+    def _relaunch_for_update(self):
+        """Exit the UI loop so the update batch can replace the locked EXE."""
+        try:
+            import webview
+            webview.stop()
+        except Exception:
+            log.exception('Could not stop webview for update')
+        if getattr(sys, 'frozen', False):
+            os._exit(0)
 
     @guarded
     def send_message(self, text, platform, chat_id, attachment=None, include_rules=False):

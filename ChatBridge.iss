@@ -1,4 +1,4 @@
-#define MyAppVersion "2.70.0"
+#define MyAppVersion "2.71.0"
 #define MyAppName "ChatBridge"
 #define MyAppExeName "ChatBridge-" + MyAppVersion + ".exe"
 

@@ -35,7 +35,7 @@
   const copy = value => JSON.parse(JSON.stringify(value));
   // The preview adapter only implements local preferences; live features return honest errors.
   const previewApi = {
-    async bootstrap(){return {ok:true,version:'2.70.0',config:readLocal('cb.preview.config',config),state:readLocal('cb.preview.state',{}),platforms:homes,status:{connected:false},provider:{enabled:false,port:8788,key:''}};},
+    async bootstrap(){return {ok:true,version:'2.71.0',config:readLocal('cb.preview.config',config),state:readLocal('cb.preview.state',{}),platforms:homes,status:{connected:false},provider:{enabled:false,port:8788,key:''}};},
     async drain_events(){return {ok:true,events:[]};},
     async state_save(value){writeLocal('cb.preview.state',value);return {ok:true};},
     async config_set(patch){config={...config,...patch};writeLocal('cb.preview.config',config);return {ok:true,config};},
@@ -106,6 +106,7 @@
     $('providerStatus').textContent=t(config.provider_enabled?'provider_enabled':'provider_disabled');
     $('providerEndpoint').textContent=`http://127.0.0.1:${config.provider_port || 8788}/v1`;
     setSwitch('dockStartupSwitch',state.dock_on_startup);$('whatsNewBtn').hidden=Boolean(config.updates_seen);
+    setSwitch('autoUpdateSwitch',config.auto_update!==false);
   }
   function renderModels() {
     platforms=[...homes,...(Array.isArray(config.custom_models)?config.custom_models:[])].filter((p,i,a)=>p && p.id && a.findIndex(q=>q.id===p.id)===i);
@@ -511,6 +512,7 @@
       state.right_hidden=Boolean(result.state?.right_hidden || state.dock_on_startup===false);state.browser_hidden=Boolean(result.state?.browser_hidden);state.utility_hidden=Boolean(result.state?.utility_hidden);fitLayout();updateStatus(result.status || {});rules=copy(config.agent_rules || builtinRules);rulesOn=config.agent_rules_on!==false;renderRules();renderTerminal();$('globalStatus').textContent=t('local_ready');
       // Restore the browser to the active chat's web conversation on boot.
       try{const _active=chat();if(_active && _active.url){if(!browserOpened)await window.__cbOpenInternalBrowser();await call('browser_nav',['navigate',_active.url],{quiet:true});}}catch(_){}
+      if(config.auto_update!==false)setTimeout(()=>checkUpdates(false).catch(()=>{}),1200);
     }catch(error){toast(error.message,true);}finally{booting=false;}
   }
   // Static actions. bind absorbs only already-reported API errors, not silent capability claims.
@@ -604,6 +606,26 @@
   bind('agentRulesMaster','click',()=>{rulesOn=!rulesOn;setSwitch('agentRulesMaster',rulesOn);queueRulesSave();});bind('addRuleBtn','click',()=>{rules.push({id:`rule-${Date.now()}-${Math.random().toString(36).slice(2,5)}`,text:'',enabled:true,builtin:false});renderRules();queueRulesSave();$('agentRulesList').lastElementChild?.querySelector('textarea').focus();});bind('saveRulesBtn','click',saveRules);bind('rulesPreviewBtn','click',previewRules);bind('rulesPreviewInput','input',localRulesPreview);
   bind('resetRulesBtn','click',async()=>{if(!await confirm(t('reset_rules_title'),t('rules_reset_confirm')))return;clearTimeout(ruleTimer);await rulesChain.catch(()=>{});const r=await call('agent_rules_reset');rules=copy(r.rules || []);rulesOn=r.on!==false;rulesDirty=false;renderRules();await previewRules();});
   bind('whatsNewBtn','click',async()=>{await confirm(t('whats_new_title'),t('whats_new_text'));await patchConfig({updates_seen:true});renderConfig();});
+  let pendingUpdate=null;
+  async function checkUpdates(manual=false){
+    if(manual){const s=$('updateStatusText');if(s)s.textContent=t('update_checking');}
+    let result;try{result=await call('update_check');}catch(error){if(manual)toast(error.message,true);return;}
+    const status=$('updateStatusText');
+    if(!result||!result.ok){if(status)status.textContent=t('update_failed');if(manual)toast(t('update_failed'),true);return;}
+    if(result.update_available){pendingUpdate=result;const banner=$('updateBanner');const label=$('updateText');if(banner){if(label)label.textContent=(t('update_available_version')||'Version {v} is available.').replace('{v}',result.latest||'');banner.hidden=false;}if(status)status.textContent=(t('update_available_version')||'Version {v} is available.').replace('{v}',result.latest||'');}
+    else{pendingUpdate=null;const banner=$('updateBanner');if(banner)banner.hidden=true;if(status)status.textContent=t('update_latest');}
+  }
+  async function installUpdate(){
+    if(!pendingUpdate){return checkUpdates(true);}
+    if(!await confirm(t('update_now'),t('update_confirm')))return;
+    const btn=$('updateInstallBtn');if(btn){btn.disabled=true;btn.textContent=t('update_installing');}
+    const asset=pendingUpdate.asset||{};
+    try{const result=await call('update_apply',[asset.url||'',asset.name||'']);if(result&&result.ok){toast(t('update_restarting'));}else{toast(result?.error||t('update_failed'),true);if(btn){btn.disabled=false;btn.textContent=t('update_now');}}}catch(error){toast(error.message,true);if(btn){btn.disabled=false;btn.textContent=t('update_now');}}
+  }
+  bind('updateInstallBtn','click',installUpdate);
+  bind('updateLaterBtn','click',()=>{const banner=$('updateBanner');if(banner)banner.hidden=true;});
+  bind('checkUpdatesBtn','click',()=>checkUpdates(true));
+  bind('autoUpdateSwitch','click',async()=>{const next=!switchOn('autoUpdateSwitch');setSwitch('autoUpdateSwitch',next);await patchConfig({auto_update:next});});
   document.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='s'){e.preventDefault();if(editor.path)saveEditor().catch(()=>{});}if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='n'&&!$('settingsModal').open){e.preventDefault();newChat().catch(()=>{});}if((e.ctrlKey||e.metaKey)&&e.key===','){e.preventDefault();openSettings().catch(()=>{});}});
   window.addEventListener('beforeunload',e=>{if(editor.dirty || rulesDirty){e.preventDefault();e.returnValue='';}});
   window.addEventListener('resize',()=>{fitLayout();sendIbFit();});document.addEventListener('visibilitychange',()=>{sendIbFit();if(!document.hidden)poll();});

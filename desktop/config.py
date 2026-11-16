@@ -12,7 +12,7 @@ import threading
 from pathlib import Path
 from typing import Any
 
-RULES_VERSION = "2.70.0"
+RULES_VERSION = "2.71.0"
 # The data directory is intentionally NOT version-suffixed: settings, chat
 # history, the audit log and the WebView2 login profile must survive upgrades.
 # RULES_VERSION still versions the built-in agent rules for migrations.
@@ -120,7 +120,7 @@ def _defaults() -> dict:
         "ws_port": 8787, "full_access": True, "approval_timeout": 120,
         "provider_enabled": False, "provider_port": 8788,
         "provider_timeout": 600, "provider_key": secrets.token_urlsafe(32),
-        "updates_seen": False, "custom_models": [],
+        "updates_seen": False, "auto_update": True, "custom_models": [],
         "agent_rules_on": True, "agent_rules": copy.deepcopy(DEFAULT_RULES),
         "agent_rules_version": RULES_VERSION,
         "agent_rules_defaults": {rule["id"]: rule["text"] for rule in DEFAULT_RULES},
@@ -235,7 +235,7 @@ class ConfigStore:
         for key in ("approval_timeout", "provider_timeout"):
             if type(config.get(key)) is not int or not 1 <= config[key] <= 86400:
                 raise ValueError(f"{key} must be an integer between 1 and 86400")
-        for key in ("full_access", "provider_enabled", "updates_seen", "agent_rules_on"):
+        for key in ("full_access", "provider_enabled", "updates_seen", "auto_update", "agent_rules_on"):
             if not isinstance(config.get(key), bool):
                 raise ValueError(f"{key} must be a boolean")
         if not isinstance(config.get("provider_key"), str) or not config["provider_key"].strip():
