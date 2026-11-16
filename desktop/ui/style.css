@@ -141,3 +141,15 @@ html[dir="rtl"] .hint-host,html[dir="rtl"] .hint-candidate code{direction:ltr;te
 .sidebar.collapsed{width:0!important;padding:0!important;border:0!important;overflow:hidden}
 .right-body{flex-direction:column}
 
+
+/* Chat delete button styles */
+.chat-item { position: relative; display: flex; align-items: center; }
+.chat-delete { position: absolute; right: 8px; opacity: 0; transition: opacity 0.2s; cursor: pointer; color: var(--muted); font-size: 16px; line-height: 1; }
+.chat-item:hover .chat-delete { opacity: 0.7; }
+.chat-delete:hover { opacity: 1 !important; color: var(--accent); }
+
+/* Rules toggle in the message composer. */
+.rules-toggle{display:inline-flex;align-items:center;gap:5px;flex:0 0 auto;color:var(--muted);font-size:.82em;white-space:nowrap;cursor:pointer;user-select:none}
+.rules-toggle input{width:14px;height:14px;margin:0;accent-color:var(--accent-strong);cursor:pointer}
+.rules-toggle:has(input:checked){color:var(--accent)}
+.rules-toggle input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}

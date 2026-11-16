@@ -12,7 +12,7 @@ import threading
 from pathlib import Path
 from typing import Any
 
-RULES_VERSION = "2.60.0"
+RULES_VERSION = "2.70.0"
 # The data directory is intentionally NOT version-suffixed: settings, chat
 # history, the audit log and the WebView2 login profile must survive upgrades.
 # RULES_VERSION still versions the built-in agent rules for migrations.

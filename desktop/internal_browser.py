@@ -16,7 +16,7 @@ from .toolparse import parse_tool_calls, has_unterminated
 from .config import DATA_DIR_NAME
 
 log = logging.getLogger(__name__)
-VERSION = '2.60.0'
+VERSION = '2.70.0'
 MAX_TOOL_ROUNDS = 24
 PLATFORM_HOME = {'chatgpt': 'https://chatgpt.com/', 'claude': 'https://claude.ai/',
                  'zai': 'https://chat.z.ai/', 'deepseek': 'https://chat.deepseek.com/',
@@ -147,6 +147,7 @@ class InternalBrowser:
         self._loaded = threading.Event()
         self._creating = threading.Lock()
         self._eval_lock = threading.Lock()
+        self._inject_lock = threading.Lock()
         self._geometry = None
         self._driver_started = False
         self._ws = None
@@ -254,7 +255,14 @@ class InternalBrowser:
         self._loaded.clear()
 
     def _inject(self):
+        if not self._inject_lock.acquire(blocking=False):
+            log.debug('Agent inject already running; skipping duplicate attempt')
+            return
         try:
+            # This inject disposes the page agent before installing the new
+            # script; clear readiness so _turn waits for the replacement
+            # instead of racing against a half-installed window.__CB__.
+            self._loaded.clear()
             prefix = ''
             if self.hints_provider:
                 try:
@@ -271,8 +279,11 @@ class InternalBrowser:
             # never stop _loaded from being set (z.ai/deepseek SPAs are slow).
             self._loaded.set()
             try:
+                log.info('inject-probe: active_turn=%r loaded=%s — running diagnostic probe+snap', getattr(self, '_active', None), self._loaded.is_set())
+                _probe_t0 = time.monotonic()
                 probe = self.call('probe', timeout=8)
                 page = self.call('snap', timeout=8) or {}
+                log.info('inject-probe: probe+snap done in %.0fms — active_turn=%r', (time.monotonic() - _probe_t0) * 1000, getattr(self, '_active', None))
                 log.info('Agent injected platform=%s probe=%s result=%s', self.platform, probe, result)
                 self.sink({'type': 'browser_log', 'text': 'Agent injected: ' + json.dumps(probe, ensure_ascii=False)})
                 self.sink({'type': 'browser_status', 'connected': self.bridge.connected,
@@ -285,6 +296,11 @@ class InternalBrowser:
             self.sink({'type': 'browser_log', 'text': 'Agent injection failed: ' + str(exc)})
             # Some pages throw on early injection; retry the agent install.
             threading.Timer(4.0, self.reinject).start()
+        finally:
+            try:
+                self._inject_lock.release()
+            except RuntimeError:
+                pass
 
     def evaluate(self, script, timeout=10, guard=None):
         if not self.window:
@@ -327,11 +343,15 @@ class InternalBrowser:
                 # Best-effort release: the timeout path may already have
                 # force-released this lock, so double-release is harmless.
                 self._force_release_eval_lock()
-        threading.Thread(target=worker, daemon=True, name='webview-eval').start()
+        _eval_thread = threading.Thread(target=worker, daemon=True, name='webview-eval')
+        _eval_thread.start()
+        log.info('evaluate: worker started (timeout=%ss, alive=%s)', timeout, _eval_thread.is_alive())
         if not done.wait(timeout):
             # A native evaluate_js can be orphaned when the page navigates
             # away from the JS context mid-call. Force-release the lock so
             # the next retry does not fail with "still blocked" forever.
+            log.warning('evaluate: timeout after %ss (worker alive=%s, lock=%s) — releasing eval lock',
+                        timeout, _eval_thread.is_alive(), 'held' if self._eval_lock.locked() else 'free')
             self._force_release_eval_lock()
             raise TimeoutError('WebView script timed out')
         if 'error' in result:
@@ -539,7 +559,7 @@ class InternalBrowser:
     async def _ensure(self, platform, url=None, fresh=False):
         if not self.window:
             self.open(platform)
-        if not await asyncio.to_thread(self._loaded.wait, 25):
+        if not await asyncio.to_thread(self._loaded.wait, 45):
             raise RuntimeError('no-tab')
         snap = await self._call('snap') or {}
         home = self.homes.get(platform)
@@ -554,11 +574,11 @@ class InternalBrowser:
                 await asyncio.to_thread(self.window.load_url, target)
                 threading.Thread(target=self._late_ready, daemon=True,
                                  name='agent-late-ready').start()
-                if not await asyncio.to_thread(self._loaded.wait, 25):
+                if not await asyncio.to_thread(self._loaded.wait, 45):
                     raise RuntimeError('Navigation did not finish')
             elif navigated.get('how') == 'location':
                 await asyncio.sleep(2)
-                if not await asyncio.to_thread(self._loaded.wait, 25):
+                if not await asyncio.to_thread(self._loaded.wait, 45):
                     raise RuntimeError('Navigation did not finish')
             await asyncio.sleep(1.4)
         self.platform = platform
@@ -568,6 +588,7 @@ class InternalBrowser:
         deadline = time.monotonic() + seconds
         while time.monotonic() < deadline and not self.stopped(rid):
             snap = await self._call('snap') or {}
+            log.info('_wait_idle poll: busy=%r stage=%r ready=%r', snap.get('busy'), snap.get('stage'), snap.get('ready'))
             if not snap.get('busy'):
                 return True
             await self._emit('assistant_waiting', platform=platform, request_id=rid,
@@ -641,7 +662,14 @@ class InternalBrowser:
                     has_attachment=bool(attachment), tool_count=len(tool_ids or []))
         try:
             await self._ensure(platform, packet.get('conv_url'), bool(packet.get('fresh')))
+            # An in-flight reinject disposes the page agent; wait for it to
+            # finish so waitReady is not aborted by dispose() mid-poll.
+            if not self._loaded.is_set():
+                await asyncio.to_thread(self._loaded.wait, 15)
+            # _loaded is cleared at the start of every inject, so the wait above
+            # already guarantees no dispose() is in flight when waitReady runs.
             ready = await self._call('waitReady', 90000 if platform in ('deepseek', 'zai') else 30000, timeout=95)
+            log.info('waitReady raw result: %r (type=%s)', ready, type(ready).__name__)
             self._trace('page-ready', request_id=rid[:12], platform=platform,
                         ready=bool(ready and ready.get('ready')), editor=bool(ready and ready.get('editor')),
                         send=bool(ready and ready.get('send')))
@@ -677,7 +705,10 @@ class InternalBrowser:
             await self._call('baseline')
             self._trace('before-send', request_id=rid[:12], count=before.get('count', 0),
                         text_length=len(str(before.get('text', ''))), busy=bool(before.get('busy')))
+            _send_t0 = time.monotonic()
+            log.info('turn-send: start request_id=%s platform=%s timeout=%ss attachment=%s', rid[:12], platform, 90 if attachment else 65, bool(attachment))
             raw_send = (await self._call('submit', timeout=90)) if attachment else (await self._call('send', text, timeout=65))
+            log.info('turn-send: done request_id=%s in %.0fms raw_type=%s', rid[:12], (time.monotonic() - _send_t0) * 1000, type(raw_send).__name__)
             # Some WebView2/pywebview callback paths unwrap an object-shaped
             # JS result to a boolean. True still means the page accepted the
             # click; normalize it instead of crashing on ``send.get``.

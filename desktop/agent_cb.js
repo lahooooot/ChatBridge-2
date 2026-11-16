@@ -1,7 +1,7 @@
 /* ChatBridge page agent. DOM only: the Python driver owns capture and tool parsing. */
 (() => {
   'use strict';
-  const VER = '2.60.0';
+  const VER = '2.70.0';
   // All site-specific selectors live here. Never use generated build-hash classes.
   const HINTS = {
     common: {
@@ -114,6 +114,7 @@
   const decorations = [];
   const shadowStyles = new Map();
   let disposed = false, sending = false, stopEpoch = 0, fileSettledAt = 0;
+  let _wrCount = 0;
   // Last text ChatBridge injected. Generic sites have no author attributes, so
   // this is how reading() tells our own message apart from the model reply.
   let lastInjected = '';
@@ -180,7 +181,19 @@
   function isStop(el) { return !!el && (platform === 'deepseek' ? square(el) : matches(el, [...hint.stop, ...HINTS.common.stop]) || /stop/i.test([el.getAttribute('aria-label'), el.getAttribute('title'), el.className].join(' '))); }
   function findStop() {
     if (platform === 'deepseek') { const b = deepseekControl(); return b && square(b) ? b : null; }
-    return choose([...hint.stop, ...HINTS.common.stop], {allowDisabled: true, last: true}).el;
+    if (platform === 'gemini') {
+      for (const s of hint.stop) {
+        const list = query(s).filter(el => visible(el));
+        if (list.length) {
+          const el0 = list[list.length - 1];
+          trace('gemini-stop-hit', {sel: s, tag: el0.tagName, aria: el0.getAttribute('aria-label'), cls: String(el0.className).slice(0, 100)});
+          return el0;
+        }
+      }
+      return null;
+    }
+    const hit = choose([...hint.stop, ...HINTS.common.stop], {allowDisabled: true, last: true});
+    return hit.el;
   }
   function findSend() {
     if (platform === 'deepseek') { const b = deepseekControl(); return {el: b && enabled(b) && !square(b) ? b : null, selector: hint.send[0]}; }
@@ -193,7 +206,15 @@
     }
     return {el: null, selector: null};
   }
-  function focused(el) { let active = document.activeElement; while (active && active.shadowRoot && active.shadowRoot.activeElement) active = active.shadowRoot.activeElement; return active === el || !!active && el.contains(active); }
+  function focused(el) {
+    let active = document.activeElement;
+    while (active && active.shadowRoot && active.shadowRoot.activeElement) active = active.shadowRoot.activeElement;
+    if (active === el || (!!active && el.contains(active))) return true;
+    // Gemini wraps the real .ql-editor inside <rich-textarea>; focus() can leave
+    // the host as activeElement while the inner editable is the true target.
+    for (let p = active; p; p = parent(p)) if (p === el) return true;
+    return false;
+  }
   function focus(el) { if (!el) return false; try { el.focus({preventScroll: true}); } catch (_) { el.focus(); } return focused(el); }
   function children(node) { return node.shadowRoot ? [...node.shadowRoot.childNodes] : [...node.childNodes]; }
   function skip(el, thinking = true) {
@@ -485,10 +506,21 @@
   async function waitReady(timeout = 30000) {
     const until = Date.now() + Math.max(1000, Math.min(120000, Number(timeout) || 30000));
     let last = probe();
-    while (!disposed && Date.now() < until) {
+    while (Date.now() < until) {
+      if (disposed) {
+        // An inject is replacing this agent. If the replacement is already
+        // installed, ask it for a fresh probe instead of failing the turn.
+        const next = window.__CB__;
+        if (next && typeof next.probe === 'function') {
+          try { last = next.probe(); if (last && last.editor) return {...last, ready: true}; } catch (_) { /* fall through */ }
+        }
+        await sleep(300);
+        continue;
+      }
       last = probe();
       // Send controls are commonly disabled while the composer is empty. The
       // send ladder must inject text first, then discover the enabled button.
+      _wrCount = (_wrCount || 0) + 1; if (_wrCount % 5 === 1) trace('waitready-poll', {n: _wrCount, editor: !!last.editor, send: !!last.send, send_sel: last.send_selector, editor_sel: last.editor_selector});
       if (last.editor) return {...last, ready: true};
       await sleep(300);
     }
@@ -515,7 +547,7 @@
   async function inject(el, text) {
     const strategies = hint.pasteFirst ? ['paste', 'exec', 'native', 'text'] : ['exec', 'paste', 'native', 'text'];
     for (const how of strategies) {
-      if (!focus(el)) continue;
+      focus(el); // best-effort; carries() below is the real verification gate
       try {
         selectAll(el);
         if (how === 'exec') document.execCommand('insertText', false, text);
@@ -567,11 +599,16 @@
     try {
       // Never inject a queued result into a generating composer.
       const idleUntil = Date.now() + (hint.beforeSendMs || 45000);
+      const _busyT0 = Date.now(); let _busyCount = 0;
+      trace('send-busy-enter', {idleMs: hint.beforeSendMs || 45000, busy: busy()});
       while (busy()) {
+        _busyCount++;
+        if (_busyCount % 8 === 1) trace('send-busy-wait', {count: _busyCount, elapsedMs: Date.now() - _busyT0, busy: busy()});
         if (Date.now() >= idleUntil) return {ok: false, error: 'platform-busy', reason: 'send-failed', verdict: 'stuck'};
         if (disposed || epoch !== stopEpoch) return {ok: false, error: 'stopped', verdict: 'stuck'};
         await sleep(250);
       }
+      if (_busyCount > 0) trace('send-busy-exit', {count: _busyCount, elapsedMs: Date.now() - _busyT0, busy: busy()});
       let el = findEditor().el; if (!el) { trace('no-editor'); return {ok: false, error: 'no-input', reason: 'no-input', verdict: 'stuck'}; }
       await settleFile();
       const before = reading();
@@ -591,6 +628,7 @@
         }
         await settleFile(); focus(el);
         let button = findSend().el;
+        try { const _diag = hint.send.map(s => { const m = query(s); const el0 = m[0]; return {s, n: m.length, vis: el0 ? visible(el0) : null, en: el0 ? enabled(el0) : null, dis: el0 ? !!el0.disabled : null, aria: el0 ? el0.getAttribute('aria-disabled') : null}; }); trace('send-diag', {round, diag: _diag}); } catch (_) {}
         trace('send-control', {round, found: !!button, enabled: !!button && enabled(button), stop: !!button && isStop(button), selector: findSend().selector || null, composerLength: editorText(el).length});
         if (button && focus(el) && enabled(button) && !isStop(button)) { button.click(); how = injected.how + '+click'; }
         verdict = await verify(before, el, epoch);
@@ -864,6 +902,101 @@
     picker.box.remove(); picker.label.remove(); picker = null;
     return true;
   }
+  const TEST_TEXT = 'این یک پیام برای تست ارتباط بین من و تو است';
+  function pickerCandidates(el) {
+    const out = []; let p = el;
+    for (let i = 0; p && i < 5; i++, p = parent(p)) {
+      if (p.nodeType !== 1) continue;
+      out.push({el: p, path: cssPath(p), tag: p.tagName.toLowerCase(),
+                text: String(p.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 60)});
+      if (/^(MAIN|FORM|BODY)$/.test(p.tagName)) break;
+    }
+    return out;
+  }
+  function pickerConfirm(mode, cands, info) {
+    const bar = document.createElement('div');
+    bar.setAttribute('data-cb-ui', 'picker-confirm');
+    bar.style.cssText = 'position:fixed;left:8px;right:8px;bottom:8px;z-index:2147483647;background:#111218;color:#e5e5ec;border:1px solid #2b2d39;border-radius:6px;padding:8px;font:12px sans-serif;max-height:40vh;overflow:auto';
+    const title = document.createElement('div');
+    title.textContent = 'Mode: ' + mode + ' — click a candidate to test injection, then confirm.';
+    title.style.cssText = 'margin-bottom:6px;font-weight:bold';
+    bar.append(title);
+    const rows = [];
+    cands.forEach((c, i) => {
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex;align-items:center;gap:6px;padding:3px 0;border-top:1px solid #1e1f28';
+      const lbl = document.createElement('span');
+      lbl.textContent = '#' + (i+1) + ' <' + c.tag + '> ' + (c.el.getBoundingClientRect().width|0) + 'x' + (c.el.getBoundingClientRect().height|0) + ' — ' + c.text;
+      lbl.style.cssText = 'flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
+      const testBtn = document.createElement('button');
+      testBtn.textContent = 'تست درج';
+      testBtn.style.cssText = 'background:#2b2d39;color:#e5e5ec;border:1px solid #3b3d49;border-radius:4px;padding:2px 6px;cursor:pointer';
+      testBtn.onclick = async () => {
+        testBtn.disabled = true; testBtn.textContent = '…';
+        let ok = false; try { const r = await inject(c.el, TEST_TEXT); ok = !!r.ok && carries(c.el, TEST_TEXT); } catch (_) {}
+        testBtn.textContent = ok ? '✅ نشست' : '❌ ننشست';
+        testBtn.style.background = ok ? '#1e4620' : '#4a1e1e';
+        if (ok) row.dataset.ok = '1'; testBtn.disabled = false;
+      };
+      row.append(lbl, testBtn);
+      rows.push(row);
+      bar.append(row);
+    });
+    const actions = document.createElement('div');
+    if (mode === 'send') {
+      const sendTest = document.createElement('div');
+      sendTest.style.cssText = 'margin-top:8px;padding-top:8px;border-top:1px solid #1e1f28;display:flex;gap:6px;align-items:center';
+      const stBtn = document.createElement('button');
+      stBtn.textContent = 'تست ارسال پیام';
+      stBtn.style.cssText = 'background:#2b2d39;color:#e5e5ec;border:1px solid #3b3d49;border-radius:4px;padding:4px 10px;cursor:pointer';
+      const stMsg = document.createElement('span');
+      stMsg.style.cssText = 'font-size:11px;color:#a49aff';
+      stBtn.onclick = async () => {
+        stBtn.disabled = true; stMsg.textContent = 'در حال تست…';
+        try {
+          const ed = findEditor().el;
+          if (!ed) { stMsg.textContent = 'ادیتور پیدا نشد'; stBtn.disabled = false; return; }
+          const inj = await inject(ed, TEST_TEXT);
+          if (!inj.ok) { stMsg.textContent = 'درج نشد'; stBtn.disabled = false; return; }
+          await sleep(120);
+          const beforeCount = reading().count;
+          let clicked = null;
+          for (const c of cands) { try { if (c.el && c.el.click) { c.el.click(); clicked = c; break; } } catch (_) {} }
+          await sleep(1500);
+          const afterCount = reading().count;
+          const stopNow = !!findStop();
+          const accepted = afterCount > beforeCount || stopNow;
+          if (accepted) {
+            const idx = clicked ? cands.indexOf(clicked) : -1;
+            if (idx >= 0) { rows[idx].dataset.ok = '1'; rows[idx].style.background = '#1e4620'; }
+            stMsg.textContent = '✅ ارسال شد — دکمه تأیید را بزن';
+          } else {
+            stMsg.textContent = '❌ ارسال نشد (count=' + afterCount + ' stop=' + stopNow + ')';
+          }
+        } catch (e) { stMsg.textContent = 'خطا: ' + (e && e.message || e); }
+        stBtn.disabled = false;
+      };
+      sendTest.append(stBtn, stMsg);
+      bar.insertBefore(sendTest, actions);
+    }
+    actions.style.cssText = 'display:flex;gap:6px;margin-top:6px;justify-content:flex-end';
+    const cancelBtn = document.createElement('button');
+    cancelBtn.textContent = 'انصراف';
+    cancelBtn.style.cssText = 'background:#2b2d39;color:#e5e5ec;border:1px solid #3b3d49;border-radius:4px;padding:4px 10px;cursor:pointer';
+    cancelBtn.onclick = () => { bar.remove(); emit({type:'picker_pick', ok:false, mode, error:'cancelled'}); };
+    const okBtn = document.createElement('button');
+    okBtn.textContent = 'تأیید انتخاب‌شده';
+    okBtn.style.cssText = 'background:#1e4620;color:#e5e5ec;border:1px solid #2e5e30;border-radius:4px;padding:4px 10px;cursor:pointer';
+    okBtn.onclick = () => {
+      const chosen = rows.findIndex(r => r.dataset.ok === '1');
+      if (chosen < 0) { toast ? toast('اول یک کاندید را با «تست درج» تأیید کن', true) : 0; return; }
+      bar.remove();
+      emit({type:'picker_pick', ok:true, mode, chosen, candidates: cands.map(c => ({path:c.path, tag:c.tag, text:c.text})), path: cands[chosen].path, tag: cands[chosen].tag, text: cands[chosen].text, ...info});
+    };
+    actions.append(cancelBtn, okBtn);
+    bar.append(actions);
+    document.documentElement.append(bar);
+  }
   function pickerStart(mode) {
     pickerStop();
     const box = document.createElement('div');
@@ -888,10 +1021,10 @@
     const click = e => {
       if (!current) return;
       e.preventDefault(); e.stopPropagation(); if (e.stopImmediatePropagation) e.stopImmediatePropagation();
-      const el = current, path = cssPath(el);
+      const _cands = pickerCandidates(current); if (!_cands.length) return; const el = current, path = cssPath(el);
       const info = {ok: true, mode, path, tag: el.tagName.toLowerCase(),
                     role: el.getAttribute('role') || '', text: String(el.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 60)};
-      pickerStop(); emit({type: 'picker_pick', ...info});
+      pickerStop(); pickerConfirm(mode, _cands, info);
     };
     const key = e => { if (e.key === 'Escape') { const m = mode; pickerStop(); emit({type: 'picker_pick', ok: false, mode: m, error: 'cancelled'}); } };
     document.addEventListener('mousemove', move, true);

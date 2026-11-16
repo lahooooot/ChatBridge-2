@@ -35,7 +35,7 @@
   const copy = value => JSON.parse(JSON.stringify(value));
   // The preview adapter only implements local preferences; live features return honest errors.
   const previewApi = {
-    async bootstrap(){return {ok:true,version:'2.60.0',config:readLocal('cb.preview.config',config),state:readLocal('cb.preview.state',{}),platforms:homes,status:{connected:false},provider:{enabled:false,port:8788,key:''}};},
+    async bootstrap(){return {ok:true,version:'2.70.0',config:readLocal('cb.preview.config',config),state:readLocal('cb.preview.state',{}),platforms:homes,status:{connected:false},provider:{enabled:false,port:8788,key:''}};},
     async drain_events(){return {ok:true,events:[]};},
     async state_save(value){writeLocal('cb.preview.state',value);return {ok:true};},
     async config_set(patch){config={...config,...patch};writeLocal('cb.preview.config',config);return {ok:true,config};},
@@ -120,7 +120,7 @@
   }
   function renderChats() {
     $('chatList').replaceChildren();
-    state.chats.forEach(c=>{const button=node('button',undefined,`chat-item${c.id===state.active_chat_id?' active':''}`);const projectName=c.project?.name || (c.project?.path ? c.project.path.split(/[\\/]/).pop() : '');button.title=[c.title || t('new_conversation'),projectName?'Project: '+projectName:'No project'].join(' · ');const copy=node('span',undefined,'chat-copy');copy.append(node('span',c.title || t('new_conversation')));if(projectName)copy.append(node('small',projectName,'chat-project'));button.append(node('span','◌','chat-icon'),copy);button.addEventListener('click',()=>selectChat(c.id));$('chatList').append(button);});
+    state.chats.forEach(c=>{const button=node('button',undefined,`chat-item${c.id===state.active_chat_id?' active':''}`);const projectName=c.project?.name || (c.project?.path ? c.project.path.split(/[\\/]/).pop() : '');button.title=[c.title || t('new_conversation'),projectName?'Project: '+projectName:'No project'].join(' · ');const copy=node('span',undefined,'chat-copy');copy.append(node('span',c.title || t('new_conversation')));if(projectName)copy.append(node('small',projectName,'chat-project'));const delBtn=node('span','×','chat-delete');delBtn.addEventListener('click',e=>{e.stopPropagation();deleteChat(c.id);});button.append(node('span','◌','chat-icon'),copy,delBtn);button.addEventListener('click',()=>selectChat(c.id));$('chatList').append(button);});
   }
   function renderProject() {
     const p=chat()?.project;
@@ -155,7 +155,7 @@
     if(hasConnection)connected=Boolean(status.connected ?? status.driver_connected ?? status.ready ?? (status.status==='connected'));
     const connecting=!connected && (status.status==='connecting'||status.status==='preparing');
     const key=connected?'connected':connecting?'connecting':'not_connected';
-    $('connectionText').textContent=t(key);$('browserState').textContent=t(key);$('settingsDriverStatus').textContent=t(key);
+    $('connectionText').textContent=t(key);if($('browserState'))$('browserState').textContent=t(key);$('settingsDriverStatus').textContent=t(key);
     ['connectionChip','ibOpenBtn','browserPane'].forEach(id=>{$(id).classList.toggle('connected',connected);$(id).classList.toggle('connecting',connecting);});
     if(status.url || status.page_url)$('browserUrl').value=status.url || status.page_url;
     if(status.browser_open!==undefined)browserOpened=Boolean(status.browser_open);
@@ -350,7 +350,7 @@
       default:if(event.ok===false&&event.error)toast(event.error,true);
     }
   }
-  function logBrowser(text){if(!text)return;const lines=($('bbLog').textContent+'\n'+String(text)).split('\n').slice(-150);$('bbLog').textContent=lines.join('\n');$('bbLog').scrollTop=$('bbLog').scrollHeight;}
+  function logBrowser(text){const log=$('bbLog');if(!text||!log)return;const lines=(log.textContent+'\n'+String(text)).split('\n').slice(-150);log.textContent=lines.join('\n');log.scrollTop=log.scrollHeight;}
   function showLimit(event){const host=$('limitBanner');host.replaceChildren(node('strong',t('limit_title')),node('p',event.snippet || t('limit_hint')));const button=node('button',t('new_chat'));button.addEventListener('click',()=>newChat().catch(()=>{}));host.append(button);host.hidden=false;}
   function showApproval(event) {
     if(!event.id || approvals.has(event.id))return;
@@ -409,6 +409,8 @@
     document.querySelectorAll('[data-panel]').forEach(el=>{const active=el.dataset.panel===tab;el.hidden=!active;el.classList.toggle('active',active);});
     fitLayout();persist();if(tab==='files')refreshFiles().catch(()=>{});if(tab==='git')refreshGit().catch(()=>{});if(tab==='terminal')renderTerminal();
   }
+  async function deleteChat(id) {if(!confirm(t('delete_chat_confirm')||'Delete this conversation?'))return;state.chats=state.chats.filter(c=>c.id!==id);if(state.active_chat_id===id)state.active_chat_id=state.chats[0]?.id || '';renderChats();renderProject();renderModels();renderStream();persist();}
+
   async function selectChat(id) {const c=state.chats.find(v=>v.id===id);if(!c)return;state.active_chat_id=id;await syncWorkspace();activeRequest=busyChats.get(id)||'';renderChats();renderProject();renderModels();renderStream();setBusy(c,busyChats.has(id),activeRequest);persist();try{const wasOpen=browserOpened;if(!wasOpen)await window.__cbOpenInternalBrowser();if(c.url)await call('browser_nav',['navigate',c.url],{quiet:true});else if(wasOpen){const want=home();if(!String($('browserUrl').value||'').startsWith(new URL(want).origin))await call('browser_nav',['navigate',want],{quiet:true});}}catch(_){}if(c.url&&c.web_only){const r=await call('read_web_chat',[c.platform,c.url,40]);if(r.request_id)owners.set(r.request_id,id);}if(state.active_tab==='files')await refreshFiles();}
   async function newChat() {if(!await confirm(t('new_chat_title'),t('new_chat_confirm')))return;const p=platform();const c=freshChat(p);c.project=chat()?.project || null;const result=await call('new_web_chat',[p,'']);state.chats.unshift(c);owners.set(result.request_id,c.id);await selectChat(c.id);$('limitBanner').hidden=true;}
   function importChats(list,p){if(!list.length){toast(t('no_web_chats'));return;}for(const item of list){if(!state.chats.some(c=>c.url===item.url)){const c=freshChat(p);c.title=item.title;c.url=item.url;c.web_only=true;state.chats.push(c);}}renderChats();persist();}
@@ -421,10 +423,10 @@
     await syncWorkspace();
     let text=$('composerInput').value.trim();if(!text&&!attachments.length)return;
     let sendAttachment=attachments.length?{name:attachments[0].name,mime:attachments[0].mime,data_url:attachments[0].data_url}:null;
-    const display=text;
+    const display=text;const sendRules=$('sendRulesToggle').checked || !c.messages.some(m=>m.role==='user');
     if(text.length>12000){if(sendAttachment){toast(t('attachment_long_conflict'),true);return;}sendAttachment={name:`message-${Date.now()}.txt`,mime:'text/plain',data_url:await blobDataUrl(new Blob([text],{type:'text/plain'}))};text=t('long_message');}
     $('sendBtn').disabled=true;$('composerStatus').textContent=t('sending');
-    try{const result=await call('send_message',[text,c.platform,c.id,sendAttachment]);const request=result.request_id;c.messages.push({id:`user-${request}`,role:'user',text:display,time:Date.now(),files:sendAttachment?[{name:sendAttachment.name,mime:sendAttachment.mime,data_url:sendAttachment.data_url,image:/^image\//.test(sendAttachment.mime)}]:[],project:c.project || null});if(!c.title)c.title=display.slice(0,45)||sendAttachment?.name;owners.set(request,c.id);activeRequest=request;setBusy(c,true,request);$('composerInput').value='';attachments=[];renderAttachment();renderChats();renderProject();renderStream();persist();}
+    try{const result=await call('send_message',[text,c.platform,c.id,sendAttachment,sendRules]);const request=result.request_id;c.messages.push({id:`user-${request}`,role:'user',text:display,time:Date.now(),files:sendAttachment?[{name:sendAttachment.name,mime:sendAttachment.mime,data_url:sendAttachment.data_url,image:/^image\//.test(sendAttachment.mime)}]:[],project:c.project || null});if(!c.title)c.title=display.slice(0,45)||sendAttachment?.name;owners.set(request,c.id);activeRequest=request;setBusy(c,true,request);$('composerInput').value='';$('sendRulesToggle').checked=false;attachments=[];renderAttachment();renderChats();renderProject();renderStream();persist();}
     catch(_){$('composerStatus').textContent=t('request_failed');}finally{$('sendBtn').disabled=false;}
   }
   function blobDataUrl(blob){return new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=reject;reader.readAsDataURL(blob);});}
@@ -531,7 +533,7 @@
   document.querySelectorAll('[data-tab]').forEach(el=>el.addEventListener('click',()=>setTab(el.dataset.tab)));
   bind('urlForm','submit',async e=>{e.preventDefault();const url=safeUrl($('browserUrl').value);if(!url||!/^https?:/.test(url)){toast('Use an http or https URL.',true);return;}await call('browser_nav',['navigate',url]);});
   document.querySelectorAll('[data-nav]').forEach(el=>el.addEventListener('click',()=>call('browser_nav',[el.dataset.nav,'']).catch(()=>{})));
-  bind('reinjectBtn','click',()=>call('browser_reinject'));bind('browserLogBtn','click',()=>{$('bbLog').classList.toggle('expanded');sendIbFit();});
+  
   bind('composerForm','submit',sendMessage);bind('composerInput','keydown',e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.isComposing){e.preventDefault();return sendMessage();}});
   bind('attachBtn','click',()=>{$('attachmentInput').value='';$('attachmentInput').click();});bind('attachmentInput','change',async()=>{const files=[...($('attachmentInput').files||[])];for(const f of files)await selectAttachment(f);$('attachmentInput').value='';});
   $('composerForm').addEventListener('dragover',e=>{e.preventDefault();});bind('composerForm','drop',async e=>{e.preventDefault();for(const f of [...(e.dataTransfer.files||[])])await selectAttachment(f);});bind('composerInput','paste',async e=>{const files=[...(e.clipboardData?.items || [])].filter(i=>i.kind==='file').map(i=>i.getAsFile()).filter(Boolean);if(files.length){e.preventDefault();for(const f of files)await selectAttachment(f);}});
@@ -561,14 +563,14 @@
     call('hints_get',[hintState.host],{quiet:true}).then(r=>{const h=r.hints||{};if((h.editor||[]).length||(h.send||[]).length){hintState.editors=(h.editor||[]).map(p=>({path:p}));hintState.sends=(h.send||[]).map(p=>({path:p}));hintState.saved=true;renderHintResults();$('hintModalStatus').textContent='Saved selectors exist for this host. Run detection to refresh them.';}}).catch(()=>{});}
   let pickPending=null;
   function pickBanner(show,text){const b=$('pickBanner');if(!b)return;b.hidden=!show;if(text)$('pickBannerText').textContent=text;sendIbFit();}
-  function startPick(mode){if(!hintState.host){toast('This model has no usable URL.',true);return;}const labels={editor:'message box',send:'send control',body:'response area'};
+  function startPick(mode){if(!hintState.host){toast('This model has no usable URL.',true);return;}if(mode==='send'&&!(hintState.editors&&hintState.editors.length)){toast('First pick and confirm the message box (editor), then the send control.',true);return;}const labels={editor:'message box',send:'send control',body:'response area'};
     pickPending=mode;closeHintModal();pickBanner(true,`Click the ${labels[mode]||mode} in the browser. Esc cancels.`);
     call('hints_pick',[hintState.host,mode]).then(r=>{if(!r.ok){pickBanner(false);pickPending=null;toast('Could not start picking: '+(r.error||'unknown'),true);}}).catch(error=>{pickBanner(false);pickPending=null;toast(error.message,true);});}
   function addCandidate(mode,path,label){if(!path)return;const list=mode==='editor'?hintState.editors:mode==='send'?hintState.sends:(hintState.bodies=hintState.bodies||[]);
     if(!list.some(x=>x.path===path))list.unshift({path,label:label||'',placeholder:label||''});}
   function onPickEvent(event){if(event.type!=='picker_pick'||!pickPending)return;const mode=pickPending;pickPending=null;pickBanner(false);
     if(event.ok===false){toast(event.error==='cancelled'?'Picking cancelled.':'Picking failed.',event.error!=='cancelled');reopenHintModal();return;}
-    addCandidate(mode,event.path,event.text||event.tag||'');reopenHintModal();renderHintResults();
+    if(Array.isArray(event.candidates)&&event.candidates.length){const chosenIdx=typeof event.chosen==='number'?event.chosen:0;const c=event.candidates[chosenIdx]||event.candidates[0];addCandidate(mode,c.path,c.text||c.tag||'');}else{addCandidate(mode,event.path,event.text||event.tag||'');}reopenHintModal();renderHintResults();
     $('hintModalStatus').textContent=`Added ${event.tag||'element'}${event.role?' ('+event.role+')':''} as the ${mode==='body'?'response area':mode==='send'?'send control':'message box'}. Save when ready.`;}
   function reopenHintModal(){const d=$('hintModal');if(d&&!d.open){d.showModal();overlay(true);sendIbFit();}}
   bind('browserHintBtn','click',()=>{const url=safeUrl($('browserUrl').value)||'';let host='';try{host=new URL(url).hostname.toLowerCase();}catch(_){}if(!host){toast('Open a page first.',true);return;}openHintModal({id:'current',name:host,home:url},{skipNavigate:true});});
@@ -588,6 +590,7 @@
   function overlay(active){call('browser_overlay',[!!active],{quiet:true}).catch(()=>{});}
   function closeHintModal(){$('hintModal').close();overlay(false);sendIbFit();}
   bind('hintCloseBtn','click',closeHintModal);bind('hintCancelBtn','click',closeHintModal);
+  bind('hintResetBtn','click',async()=>{if(!hintState.host){toast('No host selected.',true);return;}if(!await confirm('Reset selectors','Remove saved selectors for '+hintState.host+' and fall back to built-in defaults?'))return;try{await call('hints_set',[hintState.host,{}]);hintState.editors=[];hintState.sends=[];hintState.bodies=[];hintState.saved=false;renderHintResults();$('hintModalStatus').textContent='Reset to built-in defaults for '+hintState.host+'.';toast('Selectors reset for '+hintState.host);}catch(error){$('hintModalStatus').textContent='Could not reset: '+(error.message||error);}});
   bind('hintDetectBtn','click',async()=>{if(!hintState.host){toast('This model has no usable URL.',true);return;}hintStep('hintStepScan','active','Inspecting the open page…');$('hintModalStatus').textContent='Inspecting the page…';$('hintDetectBtn').disabled=true;
     try{const r=await call('hints_detect',[hintState.host]);const d=r.detection||{};if(!d.ok){hintStep('hintStepScan','error',d.error||'failed');$('hintModalStatus').textContent='Detection failed: '+(d.error||'unknown')+'. Is the page still loading or signed out?';return;}
       hintState.editors=d.editors||[];hintState.sends=d.sends||[];renderHintResults();

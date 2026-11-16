@@ -87,3 +87,52 @@ Key locations:
   unchanged, so `tests/test_safety.py`'s `command`-rejection contract still
   holds (that test calls `execute` directly, not the app branch). Full suite
   green (375 passed, 5 skipped).
+
+- 2026-11-14 — fixed the recurring `no-tab` / `WebView script timed out`
+  failure on Gemini and ChatGPT in `desktop/internal_browser.py`. Root cause
+  was a race: `_late_ready` and the `_inject` retry timer could start several
+  concurrent `_inject` calls, each grabbing `_eval_lock` and force-releasing
+  it on timeout, so one successful injection was immediately invalidated by
+  the next timeout. `_ensure` also waited only 25 s, shorter than the worst
+  case of two 12 s injections. Changes: added `_inject_lock` (non-blocking
+  acquire; duplicate attempts return immediately), moved the `reinject`
+  `Timer(4.0, ...)` back into the `except` branch (it had drifted into
+  `finally` and fired on success too), and raised the three `_ensure` waits
+  from 25 s to 45 s. `py_compile` green; `run_tests` green (376 passed,
+  5 skipped). One separate run under concurrent pytest load showed a
+  flaky `tests/test_fstree.py::test_concurrent_writes_are_complete_and_preserve_mode`
+  (`WinError 5` on `os.replace` in `desktop/safety.py`); this is unrelated to
+  the browser change and must be re-checked in isolation.
+- 2026-11-14 — tool-result ordering is visibly unreliable on this bridge:
+  several `run_command`, `list_dir`, `read_file` and `stat_file` replies
+  arrived out of order or replaced by an earlier request's output. The nonce
+  protocol in rule 3b is not optional here; until `run_command` accepts a
+  `nonce` argument (it currently rejects it with `Unknown tool arguments`),
+  prefer one tool request per message and write long command output to a file
+  that `read_file` can fetch later.
+- 2026-11-14 — fixed Gemini/ChatGPT messages not being sent (text never reached the web composer, so the Send button never appeared). Two root causes:
+  (1) `inject()` in `desktop/agent_cb.js` gated every injection strategy on `focus(el) === true`; Gemini keeps `<rich-textarea>` as `document.activeElement` while the real editable is the inner `div.ql-editor`, so `focused()` returned false and all strategies were skipped (`inject-verify`). Fixed by widening `focused()` to walk the activeElement's ancestors (so an ancestor host counts as focused) and by making `inject()` call `focus(el)` best-effort and rely on `carries(el, text)` as the real verification gate.
+  (2) A stale user file `%USERPROFILE%\.chatbridge\platform_hints.json` had a manual `gemini.google.com` entry whose `editor` selector targeted `div:nth-of-type(2)` = Quill's hidden `.ql-clipboard`, not the real `.ql-editor`; `agent_cb.js` prepends custom hints, so `findEditor()` returned the clipboard and injection went nowhere. Also its `send`/`body` selectors were wrong (`button ... > span` and the zero-state container). Deleted the file (user approved, no backup) so both Gemini and ChatGPT fall back to the built-in defaults (`div.ql-editor[contenteditable="true"]`, `button.send-button` / `button[data-testid="send-button"]`, `message-content` / `.model-response-text`).
+  Verified: `node --check desktop/agent_cb.js` → NODE_OK; full suite green twice (376 passed, 5 skipped); snapshot `before-inject-focus-fix` (stash `0adca9be`). User confirmed sending works on both sites.
+  Lesson: when a site fails to receive injected text, check `%USERPROFILE%\.chatbridge\platform_hints.json` first — a stale hand-edited hint silently overrides the built-in selectors and is not covered by any test.
+
+- 2026-11-14 — selector picker became test-driven. `pickerStart` in `desktop/agent_cb.js` now calls `pickerConfirm(mode, cands, info)`: it builds candidates from the clicked element plus its ancestors (up to 5 levels, stopping at MAIN/FORM/BODY), shows a `data-cb-ui` bar at the bottom of the page, and lets the user test each candidate with real injection (`inject` + `carries`) before confirming. For `mode==='send'` a «تست ارسال» button injects TEST_TEXT ('این یک پیام برای تست ارتباط بین من و تو است'), clicks the chosen candidate, waits 1500ms, and accepts only if `reading().count` grew or `findStop()` appeared. The confirmed candidate(s) are emitted as `picker_pick` with `candidates`/`chosen`; `desktop/ui/app.js` stores the chosen path in `hintState`. Ordering gate: `startPick('send')` refuses until `hintState.editors` is non-empty. Reset: `hintResetBtn` (in `desktop/ui/index.html`) calls `hints_set(host, {})` after a confirm dialog, clearing saved selectors for that host and falling back to built-in defaults; `hintState` is cleared and re-rendered.
+- 2026-11-14 — `edit_file` lesson confirmed in practice: search text with multiple lines fails to match on CRLF files (`internal_browser.py`, `agent_cb.js`, `app.js`, `index.html`) because `read_file` returns `\r\n` while the file's stored bytes interleave differently; single-line searches match reliably. Rule: keep `edit_file` `search` single-line unless the multi-line text was just read verbatim and `count` is verified. When a multi-line search is unavoidable, split into several single-line edits.
+- 2026-11-14 — diagnostic logging added (to be removed or demoted to DEBUG after the send bug is fixed): `evaluate()` logs worker start and timeout with `worker.alive` and `_eval_lock.locked()`; `_inject` logs `active_turn` and probe+snap duration; `_turn` logs `turn-send start/done` with elapsed ms; `agent_cb.js` logs `send-busy-enter/exit`, `send-busy-wait`, `send-diag` (per send selector: n/visible/enabled/disabled/aria-disabled), `waitready-poll`, and `probe-no-send`. These must not be left at INFO in a release build.
+- 2026-11-14 — full test suite green after the picker and logging changes (376 passed, 5 skipped). `node --check desktop/agent_cb.js` and `node --check desktop/ui/app.js` passed before the suite.
+
+- 2026-11-16 — removed dead browser chrome per user request (both did nothing).
+  `desktop/ui/index.html`: dropped the submit `<button title="Navigate">↗</button>`
+  from `#urlForm` (Enter still submits via the existing `urlForm` submit
+  handler) and removed the whole `div.browser-foot` (connection dot,
+  `#browserState`, `#reinjectBtn`, `#browserLogBtn`) plus `pre#bbLog`.
+  `desktop/ui/app.js`: made `updateStatus` null-safe for `#browserState`,
+  made `logBrowser` bail out when `#bbLog` is absent, and dropped the now-dead
+  `reinjectBtn`/`browserLogBtn` bindings. `bind()` already uses `?.`, so
+  remaining optional elements are safe. Verified: `node --check
+  desktop/ui/app.js` → NODE_OK; full suite green (376 passed, 5 skipped).
+  Rule for future UI removals: any element referenced by `$('id')` in app.js
+  must be guarded (null check) before deleting its HTML, or the UI throws on
+  load; `bind()` is already guarded but direct `.textContent`/`.classList`
+  access is not.
+- 2026-11-16 — released 2.70.0. Ran `python scripts/bump_version.py 2.70.0 --old 2.60.0`, `sync_installer_version.py`, `ver_check.py` ("Version markers are synchronized: 2.70.0"), `package_source.py`; full suite green (376 passed, 5 skipped). Bump script's default `--old` is 2.50.0, so always pass the real current version explicitly or it reports `changed: 0 file(s)`. Tagged `v2.70.0`.

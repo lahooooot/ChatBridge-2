@@ -1,4 +1,4 @@
-"""ChatBridge 2.60.0 entry point and pywebview API."""
+"""ChatBridge 2.70.0 entry point and pywebview API."""
 from __future__ import annotations
 import base64
 import functools
@@ -35,7 +35,7 @@ from .provider_server import ProviderServer
 from .toolparse import parse_tool_calls, strip_tool_blocks
 from .tools._extended import HANDLERS as EXTENDED_TOOLS
 
-APP_VERSION = '2.60.0'
+APP_VERSION = '2.70.0'
 WORKSPACE_TOOLS = (
     'read_file', 'write_file', 'list_dir', 'search_files', 'run_command',
     'edit_file', 'stat_file', 'append_file', 'make_dir', 'delete_file',
@@ -463,7 +463,7 @@ class Api:
         return {'ok': True, 'config': config}
 
     @guarded
-    def send_message(self, text, platform, chat_id, attachment=None):
+    def send_message(self, text, platform, chat_id, attachment=None, include_rules=False):
         if not text.strip() and not attachment:
             raise ValueError('Write a message or attach a file.')
         if platform not in self._browser.homes:
@@ -492,7 +492,7 @@ class Api:
             self.requests.pop(oldest, None)
             self.seen_tools = {k for k in self.seen_tools if k[0] != oldest}
         def send():
-            prompt = self.config.rules_preview(context + text, root) if root else context + text
+            prompt = self.config.rules_preview(context + text, root) if include_rules and root else (self.config.rules_preview(context + text, None) if include_rules else context + text)
             file = attachment
             if len(prompt) > 18000:
                 if attachment:

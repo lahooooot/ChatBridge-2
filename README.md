@@ -1,4 +1,4 @@
-# ChatBridge 2.60.0
+# ChatBridge 2.70.0
 
 ChatBridge is a Windows desktop workspace for browser-based AI chats. It combines a local chat surface, an internal WebView2 browser, project files and an editor, a live terminal, Git controls, editable agent rules, and an optional local OpenAI-compatible provider. The source uses Python and vanilla HTML/CSS/JavaScript; there is no frontend build step, extension, or iframe.
 
