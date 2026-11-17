@@ -36,7 +36,7 @@ from .internal_browser import InternalBrowser, PLATFORM_HOME, profile_path
 from .provider_server import ProviderServer
 from .provider_models import BUILTIN_PLATFORM_NAMES, build_models
 from . import provider_presets
-from .toolparse import parse_tool_calls, strip_tool_blocks
+from .toolparse import extract_requests, strip_tool_blocks
 from .tools._extended import HANDLERS as EXTENDED_TOOLS
 from . import updater
 
@@ -224,10 +224,12 @@ class Api:
         if event['type'] in ('assistant_stream', 'assistant_response'):
             raw = event.get('text', '')
             event['text'] = strip_tool_blocks(raw)
-            calls = event.pop('parsed_calls', None)
-            if calls is None:
-                calls = parse_tool_calls(raw) if event['type'] == 'assistant_response' else []
-            event['operations'] = [self._operation(c) for c in calls if c['tool'] != '__parse_error__']
+            requests = event.pop('requests', None)
+            if requests is None:
+                requests = extract_requests(raw) if event['type'] == 'assistant_response' else []
+            event['operations'] = [self._operation({'id': item['id'], 'tool': item['tool'],
+                                                    'args': item['args']})
+                                   for item in requests if item['tool'] != '__parse_error__']
         if event['type'] == 'file_data':
             event['type'] = 'file_ready'
         self.sink(event)
@@ -287,7 +289,7 @@ class Api:
         operation = self._operation(call)
         try:
             if tool == '__parse_error__':
-                raise ValueError('The tool request could not be parsed (' + str(args.get('reason')) + '). Please resend one compact standard chatbridge-tool-call JSON block with tool and args. Available tools: ' + ', '.join(TOOLS))
+                raise ValueError('The request could not be parsed (' + str(args.get('reason')) + '). Please resend one small JSON object with tool and args fields, in a plain code block. I can do: ' + ', '.join(TOOLS))
             if tool not in TOOLS:
                 raise ValueError('Unknown tool. Available tools: ' + ', '.join(TOOLS))
             root = owner.get('workspace')
@@ -529,7 +531,12 @@ class Api:
             self.requests.pop(oldest, None)
             self.seen_tools = {k for k in self.seen_tools if k[0] != oldest}
         def send():
-            prompt = self.config.rules_preview(context + text, root) if include_rules and root else (self.config.rules_preview(context + text, None) if include_rules else context + text)
+            saved = self.config.load_state().get('chats', [])
+            has_user = any(isinstance(m, dict) and m.get('role') == 'user'
+                           for c in saved if isinstance(c, dict) and c.get('id') == chat_id
+                           for m in (c.get('messages') or []))
+            inject = include_rules or (not has_user and self.config.get().get('agent_rules_on', True))
+            prompt = self.config.rules_preview(context + text, root) if inject and root else (self.config.rules_preview(context + text, None) if inject else context + text)
             file = attachment
             if len(prompt) > 18000:
                 if attachment:

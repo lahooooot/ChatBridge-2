@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from typing import Any, Iterator
 from uuid import uuid4
 
-__all__ = ["parse_tool_calls", "strip_tool_blocks", "has_unterminated"]
+__all__ = ["parse_tool_calls", "strip_tool_blocks", "has_unterminated", "extract_requests"]
 
 _BIDI = dict.fromkeys(map(ord, "\u200b\u200e\u200f\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069\ufeff"))
 _NAME = re.compile(r"[\w.:-]{1,64}\Z")
@@ -703,3 +703,66 @@ def has_unterminated(text: str) -> bool:
     but closed requests must settle and report an error, not wait indefinitely.
     """
     return any(not region.complete for region in _regions(_text(text)))
+
+
+# A request block carries a bare JSON object; the label is not part of the deal.
+_PLAIN_FENCE = re.compile(r"[ \t]*`{3,}[^\n]*\n[ \t]*\{[^\n]*\}[ \t]*\n[ \t]*`{3,}[ \t]*(?:\n|\Z)")
+
+
+def _plain_regions(text: str) -> list[_Region]:
+    """Yield completed code fences that hold exactly one bare request object.
+
+    Only fences whose body is a lone balanced ``{"tool": ...}`` root count, so
+    ordinary code samples and prose fences never become requests.  The label is
+    not announced anywhere; a fence is accepted whatever its language tag is.
+    """
+    regions: list[_Region] = []
+    lines = text.splitlines(keepends=True)
+    offsets: list[int] = []
+    position = 0
+    for line in lines:
+        offsets.append(position)
+        position += len(line)
+    anchored = {region.start for region in _fence_regions(text)[0]}
+    index = 0
+    while index < len(lines):
+        fence = _FENCE.fullmatch(lines[index].rstrip("\r\n"))
+        if not fence:
+            index += 1
+            continue
+        count = len(fence.group(1))
+        close = index + 1
+        while close < len(lines):
+            candidate = _FENCE.fullmatch(lines[close].rstrip("\r\n"))
+            if candidate and len(candidate.group(1)) >= count and not candidate.group(2).strip():
+                break
+            close += 1
+        complete = close < len(lines)
+        end = offsets[close] if complete else len(text)
+        body = text[offsets[index] + len(lines[index]):end]
+        roots = [raw for _, root_end, raw in _roots(body)
+                 if root_end is not None and _taught_root(raw)]
+        if complete and len(roots) == 1 and roots[0].strip() == body.strip():
+            # An explicit contract fence already owns this body; never claim it twice.
+            if offsets[index] not in anchored:
+                regions.append(_Region("call", offsets[index], end, body, True))
+        index = close + 1 if complete else len(lines)
+    return regions
+
+
+def extract_requests(text: str) -> list[dict[str, Any]]:
+    """Return the requests a model asked for, one entry per call.
+
+    Each entry is ``{"tool": name, "args": {...}, "prose": str}`` where ``prose``
+    is the surrounding answer text with every request block removed.  An empty
+    list means the answer asked for nothing, so the caller can move on.
+    """
+    text = _text(text)
+    calls = [call for call in parse_tool_calls(text) if call["tool"] != "__parse_error__"]
+    prose = strip_tool_blocks(text)
+    for region in _plain_regions(text):
+        found, _ = _parse_fence(region.body)
+        calls.extend(call for call in found if call["tool"] != "__parse_error__")
+    prose = _PLAIN_FENCE.sub("", prose).strip()
+    return [{"id": call["id"], "tool": call["tool"], "args": call["args"], "prose": prose}
+            for call in calls]

@@ -4,7 +4,7 @@ All pywebview Api methods return JSON dictionaries `{ok: true, ...}` or `{ok:fal
 
 ## API methods
 
-- bootstrap() -> {ok,version,config,state,platforms:[{id,name,home}],provider:{enabled,port,key},status}
+- bootstrap() -> {ok,version,config,state,platforms:[{id,name,home}],provider:{enabled,port,key,running,models:[{id,name,platform}]},status}
 - drain_events() -> {ok,events:[]}
 - state_save(state) -> {ok}
 - config_set(patch) -> {ok,config}
@@ -28,8 +28,15 @@ All pywebview Api methods return JSON dictionaries `{ok: true, ...}` or `{ok:fal
 - file_upload(name,mime,data_url,platform) / file_fetch(url,name,platform) / file_save(name,data_url) -> {ok,id}; file_ready {id,name,data_url,ok,error?}
 - logs_get() -> {ok,lines}; logs_export() -> {ok,path}
 - provider_set(enabled,port=8788) -> {ok,...}
+- provider_models() -> {ok,base_url,port,models:[{id,name,platform}],running,presets:[{id,label,format,note,config_path,snippet}]}
+- provider_test() -> {ok,running,models:[id],error}
+- provider_key_rotate() -> {ok,key}
 
 ## Module contracts
+
+provider_models.py: build_models(platforms,custom_models)->[{id,name,platform}], model_id_for(platform), platform_for_model(model_id), default_models()->[{id,name,platform}]. Single source of truth for the models the provider exposes.
+
+provider_presets.py: list_presets(base_url,key,models)->[{id,label,format,note,config_path,snippet}], build_snippet(preset_id,base_url,key,models)->str. Data-driven registry of ready-to-paste provider snippets for OpenAI-compatible agents.
 
 config.py: ConfigStore(base=None): get()->dict, update(patch)->dict, rules_get()->{rules,on}, rules_set(rules,on)->dict, rules_reset()->dict, rules_preview(text='',workspace=None)->str, load_state()->dict, save_state(state). config contains provider_key, custom_models, etc. Thread safe and atomic saves.
 

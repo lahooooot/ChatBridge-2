@@ -7,7 +7,7 @@ import threading
 import time
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from .toolparse import parse_tool_calls, strip_tool_blocks
+from .toolparse import extract_requests, strip_tool_blocks
 from .provider_models import default_models, platform_for_model
 
 DEFAULT_MODELS = default_models()
@@ -25,11 +25,11 @@ def flatten_messages(messages, tools=None):
         if message.get('tool_calls'):
             for call in message['tool_calls']:
                 function = call.get('function', {})
-                parts.append('```chatbridge-tool-call\n' + json.dumps({
-                    'id': call.get('id'), 'tool': function.get('name'),
+                parts.append('```json\n' + json.dumps({
+                    'tool': function.get('name'),
                     'args': json.loads(function.get('arguments', '{}'))}, ensure_ascii=False) + '\n```')
     if tools:
-        parts.append('I have tools available in my client. To request one, please write a compact JSON object in a chatbridge-tool-call code fence with tool and args fields. I will execute it in my client, not in this browser. Available tool schemas:\n' + json.dumps(tools, ensure_ascii=False))
+        parts.append('I can do things for you in your working folder. If you need an action, just tell me what to do and I will handle it. I can read and write files, list folders, search, run commands, inspect Git and fetch a public web page. Available actions:\n' + json.dumps(tools, ensure_ascii=False))
     return '\n\n'.join(parts)
 
 
@@ -175,7 +175,10 @@ class ProviderServer:
                         elif kind == 'assistant_response':
                             raw = event.get('text', '')
                             text = strip_tool_blocks(raw)
-                            calls = [call for call in parse_tool_calls(raw) if call['tool'] != '__parse_error__']
+                            requests = event.get('requests')
+                            calls = [call for call in (requests if requests is not None
+                                                      else extract_requests(raw))
+                                     if call['tool'] != '__parse_error__']
                             native = [{'id': c['id'], 'type': 'function', 'function': {
                                 'name': c['tool'], 'arguments': json.dumps(c['args'], ensure_ascii=False)}} for c in calls]
                             finish = 'tool_calls' if native else 'stop'

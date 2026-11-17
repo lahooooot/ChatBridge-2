@@ -51,7 +51,7 @@ The first built-in rule instructs the model to look for an `agent.md` file at th
 The local tools fall into four groups. Workspace file tools: `read_file` (with `offset`/`limit`), `write_file` (full `content` or `search`/`replace`), `list_dir`, `search_files`, `stat_file`, `append_file`, `make_dir`, `delete_file`, `rename_file`/`move_file`, `copy_file`, `glob`, `grep`, `edit_file` (with `count` and `regex`), `diff_preview`, `read_multiple_files`, `tail_file`, `outline`, `find_symbol`, and `run_command`. Git tools: `git_status`, `git_diff`, `git_log`, `git_show`, `git_blame`, `git_stage`, `git_unstage`, `git_commit`, `git_branch`, `git_checkout`, `snapshot`, and `rollback`. Process and test tools: `process_control` and `run_tests`. Network tool: `http_fetch` (http/https only, loopback/private/link-local blocked, 2 MB cap). All paths stay inside the attached workspace. Requests use a standard code fence:
 
 ````text
-```chatbridge-tool-call
+```json
 {"tool":"read_file","args":{"path":"src/app.py","offset":0,"limit":120}}
 ```
 ````
@@ -62,7 +62,7 @@ The canonical Python parser handles fenced JSON, raw string control-character re
 
 ## Provider server
 
-Enable the provider in Settings. It binds to `127.0.0.1:8788`, exposes `GET /v1/models` and `POST /v1/chat/completions`, and uses the generated key shown in the UI. The internal browser must be open and signed in. Available models are `web-chatgpt`, `web-claude`, `web-deepseek`, `web-zai` and `web-gemini`.
+Enable the provider in Settings. It binds to `127.0.0.1:8788`, exposes `GET /v1/models`, `GET /v1/models/<id>` and `POST /v1/chat/completions`, and uses the generated key shown in the UI. The internal browser must be open and signed in. The exposed models follow the models you configured: each built-in web chat and each custom model appears as `web-<platform id>` (`web-chatgpt`, `web-claude`, `web-deepseek`, `web-zai`, `web-gemini`, plus your own custom ones).
 
 ```python
 from openai import OpenAI
@@ -76,6 +76,26 @@ print(response.choices[0].message.content)
 Streaming uses SSE. Tool fences are converted to native `tool_calls` for the external client; requests prefixed `prov-` never execute local desktop tools. Token usage is unavailable from web pages, so the response includes `chatbridge.usage_is_unavailable: true` and zero-valued usage counters rather than invented estimates. This is a practical chat-completions facade, not the full OpenAI API: audio, vision content blocks, embeddings, Responses API, logprobs and arbitrary generation parameters are not implemented. One browser serializes turns; parallel API calls queue and are not independent parallel web sessions.
 
 Each HTTP completion starts a fresh web conversation and sends the full client-supplied transcript. It must not inherit a previously open desktop conversation. Multi-turn API clients should send their accumulated messages on each request; the provider does not reuse hidden browser context.
+
+## Connect an agent
+
+Settings > Provider Server has a **Connect an agent** panel. It shows the base
+URL, the access key and the exposed model ids, and generates a ready-to-paste
+provider block for the agent you use. ChatBridge never edits an agent's own
+configuration; copy the snippet and merge it yourself.
+
+- **opencode** — merge the `provider.chatbridge` block into
+  `~/.config/opencode/opencode.json` (JSON).
+- **Hermes** — merge the `providers.chatbridge` block into
+  `%LOCALAPPDATA%\hermes\config.yaml` and add the
+  `CHATBRIDGE_API_KEY=...` line to `%LOCALAPPDATA%\hermes\.env` (YAML plus
+  environment variable).
+- **Any other agent** — the JSON, YAML and environment presets cover every
+  client that follows the OpenAI convention, and the curl preset checks the
+  endpoint from a terminal.
+
+Adding another agent is one entry in `desktop/provider_presets.py`; the panel
+is generated from that registry, so it is not limited to the presets above.
 
 ## Build Windows executable and installer
 

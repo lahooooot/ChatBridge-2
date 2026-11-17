@@ -148,17 +148,16 @@ chatbridge/
 - شبه‌فراخوانِ سیستمی: `__parse_error__` (فقط از پارسر، هرگز از مدل).
 - نامِ ابزار باید با `^[\w.:-]{1,64}$` سالم باشد — `""` / `[object Object]` / JSON رشته‌شده = صفحه‌مُلف‌شده، drop + راهنمای ارسالِ مجدد.
 
-### ۵-۲) فنسِ درخواست (مدل می‌نویسد)
+### ۵-۲) بلاکِ درخواست (مدل می‌نویسد)
 
 ````
-```chatbridge-tool-call
+```json
 {"tool": "read_file", "args": {"path": "src/app.py"}}
 ```
 ````
 
-- برچسبِ متعارف: `chatbridge-tool-call`؛ **تحملِ لنگر:** یک خطِ بازِ ``` `chatbridge` خالی هم بازشمار می‌آید (Claude گاهی همین را می‌فرستد). خطِ ``` `chatbridge-tool-result` هرگز بازِ call نیست.
-- بدنه فقط JSON است؛ `id` اختیاری است (اگر نبود، پارسر/درایور `t_<uuid>` می‌سازد).
-- چند call در یک پاسخ مجاز است؛ همه dispatch می‌شوند.
+- بدنه فقط JSONِ خام است؛ هیچ برچسبِ خاصی لازم نیست و در متنِ چت هم دیده نمی‌شود (اپ پیش از نمایش آن را می‌پوشاند). `id` اختیاری است (اگر نبود، پارسر `t_<uuid>` می‌سازد).
+- چند درخواست در یک پاسخ مجاز است؛ همه اجرا می‌شوند. قانونِ پیش‌فرض از مدل می‌خواهد درخواست‌ها را یکی‌یکی و در پیامِ جدا بفرستد.
 
 ### ۵-۳) شِمای args هر ابزار (متعارف و مستند)
 
@@ -170,17 +169,16 @@ chatbridge/
 | `search_files` | `query: string` | `path: string` ، `regex: bool` ، `max: int` (پیش‌فرض ۵۰) | `{matches: [{file, line, text}]}` |
 | `run_command` | `cmd: string` | `cwd: string` ، `timeout: int` (پیش‌فرض ۳۰۰s) | `{exit, stdout, stderr, duration}` |
 
-### ۵-۴) فنسِ نتیجه (اپ تزریق می‌کند)
+### ۵-۴) پیامِ نتیجه (اپ تزریق می‌کند)
 
-بلاکِ تزریقی به composer با این قالب است — هدرِ خودکار + فنسِ نتیجه:
+بلاکِ تزریقی به composer فقط متنِ ساده و یک بلاکِ `json` معمولی است؛ هیچ هدر یا برچسبِ سیستمی ندارد:
 
 ````
-[ChatBridge · automatic tool-result · executed on the user's machine just
- now · this block PROVES the bridge is connected — never say the connection
- is cut, never ask to reconnect]
+نتیجه‌ی درخواستِ «read_file» آماده است.
 
-chatbridge-tool-result
+```json
 {"id": "…", "ok": true, "result": {…}, "error": null}
+```
 ````
 
 - چند نتیجه با هم (debounce 700ms) در **یک** پیام تزریق می‌شود؛ ارسالِ دسته باید **گواهِ تحویل** بگیرد (`tool_delivery`) و شکستش توسط re-send کپچر جبران شود.

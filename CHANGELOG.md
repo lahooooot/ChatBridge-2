@@ -9,6 +9,20 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 ## [2.71.0] - 2026-11-11
 
 ### Added
+- The provider server now follows the models you configured. Every built-in
+  web chat and every custom model is exposed as `web-<platform id>` with an
+  explicit platform mapping, `GET /v1/models` lists them and
+  `GET /v1/models/<id>` returns a single model.
+- Settings > Provider Server is now a complete setup surface: live server
+  state, a **Test connection** button, copy buttons for the base URL and the
+  access key, a manual key rotation behind a confirmation, the list of
+  exposed models, and a **Connect an agent** panel that produces a
+  ready-to-paste provider block for opencode, Hermes or any other
+  OpenAI-compatible client (JSON, YAML, environment variables or curl).
+  ChatBridge never edits an agent configuration file; the user merges the
+  snippet.
+- New desktop API methods: `provider_models()`, `provider_test()` and
+  `provider_key_rotate()`.
 - Thirty new local tools across four groups. Workspace file tools:
   `edit_file`, `stat_file`, `append_file`, `make_dir`, `delete_file`,
   `rename_file`/`move_file`, `copy_file`, `glob`, `grep`, `diff_preview`,

@@ -10,9 +10,10 @@
     {id:'deepseek',name:'DeepSeek',home:'https://chat.deepseek.com/'},
     {id:'gemini',name:'Gemini',home:'https://gemini.google.com/app'}
   ];
-  const builtinRules = [
+    const builtinRules = [
     {id:'local-workspace',builtin:true,enabled:true,text:'I have a local workspace connected to this conversation. You can ask to read or update files there, list folders, search files, and run commands when that helps with my request.'},
-    {id:'tool-format',builtin:true,enabled:true,text:'When you need a local action, please put a JSON object with tool and args in a fenced code block labeled chatbridge-tool-call. Available names include read_file, write_file, list_dir, search_files, run_command, edit_file, stat_file, append_file, make_dir, delete_file, rename_file, move_file, copy_file, glob, grep, diff_preview, read_multiple_files, tail_file, outline, find_symbol, git_status, git_diff, git_log, git_show, git_blame, git_stage, git_unstage, git_commit, git_branch, git_checkout, snapshot, rollback, process_control, run_tests, and http_fetch.'},
+    {id:'tool-format',builtin:true,enabled:true,text:'I can take care of things in my working folder: read and write files, list folders, search, run commands, inspect Git, and fetch a web page. If you need an action, send me one small JSON object such as {"tool":"read_file","args":{"path":"src/app.py"}} in a plain code block with no special label, and I will run it for you. You can also just describe what you need in your own words.'},
+    {id:'one-at-a-time',builtin:true,enabled:true,text:'I want you to send your requests one at a time, each in its own message. Once you have received the answer to one request, then send me the next one.'},
     {id:'results',builtin:true,enabled:true,text:'I will send back the actual result of each local action. Please wait for it before describing what happened, and use paths relative to my workspace.'},
     {id:'safety',builtin:true,enabled:true,text:'I prefer small, targeted edits and clear explanations before potentially destructive changes. If an action fails, please explain the error and try a practical alternative.'}
   ];
@@ -468,7 +469,7 @@
     await syncWorkspace();
     let text=$('composerInput').value.trim();if(!text&&!attachments.length)return;
     let sendAttachment=attachments.length?{name:attachments[0].name,mime:attachments[0].mime,data_url:attachments[0].data_url}:null;
-    const display=text;const sendRules=$('sendRulesToggle').checked || !c.messages.some(m=>m.role==='user');
+    const display=text;const sendRules=$('sendRulesToggle').checked;
     if(text.length>12000){if(sendAttachment){toast(t('attachment_long_conflict'),true);return;}sendAttachment={name:`message-${Date.now()}.txt`,mime:'text/plain',data_url:await blobDataUrl(new Blob([text],{type:'text/plain'}))};text=t('long_message');}
     $('sendBtn').disabled=true;$('composerStatus').textContent=t('sending');
     try{const result=await call('send_message',[text,c.platform,c.id,sendAttachment,sendRules]);const request=result.request_id;c.messages.push({id:`user-${request}`,role:'user',text:display,time:Date.now(),files:sendAttachment?[{name:sendAttachment.name,mime:sendAttachment.mime,data_url:sendAttachment.data_url,image:/^image\//.test(sendAttachment.mime)}]:[],project:c.project || null});if(!c.title)c.title=display.slice(0,45)||sendAttachment?.name;owners.set(request,c.id);activeRequest=request;setBusy(c,true,request);$('composerInput').value='';$('sendRulesToggle').checked=false;attachments=[];renderAttachment();renderChats();renderProject();renderStream();persist();}
@@ -496,29 +497,32 @@
     editor={path:result.path || path,saved:String(result.content || ''),dirty:false,revision:0,pending:null};$('editorFilename').textContent=editor.path.split(/[\\/]/).pop();$('fileEditor').value=editor.saved;$('fileEditor').disabled=false;$('editorSaveBtn').disabled=false;$('editorDirty').hidden=true;$('editorNotice').hidden=true;$('editorRevealBtn').dataset.path=editor.path;$('editorStatus').textContent=`${result.lines || editor.saved.split('\n').length} lines · ${result.bytes || new TextEncoder().encode(editor.saved).length} bytes`;updateLines();setTab('file');renderTree();
   }
   function highlightCode(text){
-    const esc=s=>s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-    // A small, safe tokenizer: comments, strings, numbers, keywords, tags, attributes.
+    // A small, safe tokenizer: comments, strings, numbers, keywords, tags.
+    // It returns DOM nodes, so no HTML string is ever injected into the page.
     const keywords=new Set(['const','let','var','function','return','if','else','for','while','class','def','import','from','export','new','async','await','try','catch','finally','throw','this','self','true','false','null','undefined','None','True','False','public','private','static','void','int','str','float','bool','elif','in','not','and','or','with','as','yield','lambda','pass','break','continue','switch','case','default','struct','enum','type','interface']);
-    const lines=String(text).split('\n');
-    const out=[];
-    for(const line of lines){
-      let res='',i=0;const n=line.length;
+    const NL=String.fromCharCode(10),DQ=String.fromCharCode(34),SQ=String.fromCharCode(39);
+    const frag=document.createDocumentFragment();
+    const span=(cls,value)=>{const el=document.createElement('span');el.className=cls;el.textContent=value;return el;};
+    const word=/[a-zA-Z0-9_]/;
+    const lines=String(text).split(NL);
+    for(let li=0;li<lines.length;li++){
+      const line=lines[li];let i=0;const n=line.length;
       while(i<n){
         const ch=line[i];
-        if((ch==='/'&&line[i+1]==='/')||ch==='#'){res+='<span class="tok-com">'+esc(line.slice(i))+'</span>';break;}
-        if(ch==='/'&&line[i+1]==='*'){const end=line.indexOf('*/',i+2);const stop=end<0?n:end+2;res+='<span class="tok-com">'+esc(line.slice(i,stop))+'</span>';i=stop;continue;}
-        if(ch==='"'||ch==="'"||ch==='`'){let j=i+1;while(j<n){if(line[j]==='\\'){j+=2;continue;}if(line[j]===ch){j++;break;}j++;}res+='<span class="tok-str">'+esc(line.slice(i,j))+'</span>';i=j;continue;}
-        if(/[0-9]/.test(ch)){let j=i+1;while(j<n&&/[0-9a-fA-FxX._]/.test(line[j]))j++;res+='<span class="tok-num">'+esc(line.slice(i,j))+'</span>';i=j;continue;}
-        if(ch==='<'&&/[a-zA-Z/]/.test(line[i+1]||'')){const m=line.slice(i).match(/^<\/?[a-zA-Z][\w:-]*/);if(m){res+='<span class="tok-tag">'+esc(m[0])+'</span>';i+=m[0].length;continue;}}
-        if(/[a-zA-Z_]/.test(ch)){let j=i+1;while(j<n&&/[\w]/.test(line[j]))j++;const word=line.slice(i,j);res+=keywords.has(word)?'<span class="tok-key">'+esc(word)+'</span>':esc(word);i=j;continue;}
-        if(/[=+\-*/%<>!&|^~?:]/.test(ch)){res+='<span class="tok-op">'+esc(ch)+'</span>';i++;continue;}
-        res+=esc(ch);i++;
+        if((ch==='/'&&line[i+1]==='/')||ch==='#'){frag.append(span('tok-com',line.slice(i)));i=n;break;}
+        if(ch==='/'&&line[i+1]==='*'){const end=line.indexOf('*/',i+2);const stop=end<0?n:end+2;frag.append(span('tok-com',line.slice(i,stop)));i=stop;continue;}
+        if(ch===DQ||ch===SQ||ch==='`'){let j=i+1;while(j<n){if(line.charCodeAt(j)===92){j+=2;continue;}if(line[j]===ch){j++;break;}j++;}frag.append(span('tok-str',line.slice(i,j)));i=j;continue;}
+        if(/[0-9]/.test(ch)){let j=i+1;while(j<n&&/[0-9a-fA-FxX._]/.test(line[j]))j++;frag.append(span('tok-num',line.slice(i,j)));i=j;continue;}
+        if(ch==='<'&&/[a-zA-Z/]/.test(line[i+1]||'')){let j=i+1;if(line[j]==='/')j++;if(/[a-zA-Z]/.test(line[j]||'')){j++;while(j<n&&(/[a-zA-Z0-9_]/.test(line[j])||line[j]===':'||line[j]==='-'))j++;frag.append(span('tok-tag',line.slice(i,j)));i=j;continue;}}
+        if(/[a-zA-Z_]/.test(ch)){let j=i+1;while(j<n&&word.test(line[j]))j++;const w=line.slice(i,j);frag.append(keywords.has(w)?span('tok-key',w):document.createTextNode(w));i=j;continue;}
+        if(/[=+*/%<>!&|^~?:-]/.test(ch)){frag.append(span('tok-op',ch));i++;continue;}
+        frag.append(document.createTextNode(ch));i++;
       }
-      out.push(res);
+      if(li<lines.length-1)frag.append(document.createTextNode(NL));
     }
-    return out.join('\n');
+    return frag;
   }
-  function updateLines(){const value=$('fileEditor').value;const count=value.split('\n').length;$('lineNumbers').textContent=Array.from({length:count},(_,i)=>i+1).join('\n');$('lineNumbers').scrollTop=$('fileEditor').scrollTop;const hl=$('codeHighlight');if(hl){hl.innerHTML=highlightCode(value)+'\n';hl.scrollTop=$('fileEditor').scrollTop;hl.scrollLeft=$('fileEditor').scrollLeft;}}
+  function updateLines(){const NL10=String.fromCharCode(10);const value=$('fileEditor').value;const count=value.split(NL10).length;$('lineNumbers').textContent=Array.from({length:count},(_,i)=>i+1).join(NL10);$('lineNumbers').scrollTop=$('fileEditor').scrollTop;const hl=$('codeHighlight');if(hl){hl.replaceChildren(highlightCode(value));hl.append(document.createTextNode(NL10));hl.scrollTop=$('fileEditor').scrollTop;hl.scrollLeft=$('fileEditor').scrollLeft;}}
   async function saveEditor(){if(!editor.path||!editor.dirty||editor.pending)return;await syncWorkspace();const content=$('fileEditor').value,revision=editor.revision;const result=await call('fs_write',[editor.path,content]);editor.pending={id:result.id,content,revision};$('editorStatus').textContent=t('saving');$('editorSaveBtn').disabled=true;}
   function handleSaved(event){if(event.ok===false){toast(event.error||t('error'),true);if(editor.pending && (!event.path||event.path===editor.path)){$('editorSaveBtn').disabled=false;editor.pending=null;$('editorStatus').textContent=t('unsaved');}return;}
     if(event.path===editor.path || (editor.pending && event.id===editor.pending.id)){if(editor.pending){editor.saved=editor.pending.content;editor.pending=null;}editor.dirty=$('fileEditor').value!==editor.saved;$('editorDirty').hidden=!editor.dirty;$('editorSaveBtn').disabled=false;$('editorStatus').textContent=t(editor.dirty?'unsaved':'save_success');toast(t('save_success'));}refreshFiles().catch(()=>{});

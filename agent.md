@@ -62,6 +62,25 @@ Key locations:
 
 10. **Coverage gate for working-tree changes** — a change may stay in the working tree only if the pytest suite exercises it. This repo has no `pytest-cov`/`coverage` in `.venv`, so measure coverage with a stdlib probe (`sys.settrace`, see `.chatbridge/cov_probe.py`) or write a targeted assertion in `tests/`. A change counts as covered only when a test asserts the new behaviour: JS/HTML edits (`desktop/agent_cb.js`, `desktop/ui/index.html`) need an explicit test, and a new Python parameter needs a test that actually passes it. Never leave a half-finished parameter in the tree — a dead parameter such as `attachments` silently drops user input. Cancel uncovered changes with `git checkout -- <file>` after saving a backup patch (`.chatbridge\uncovered_backup.patch`).
 
+11. **Provider model registry** — the exposed model list comes from
+    `desktop/provider_models.py` (built-in platforms plus the user's custom
+    models). Never hardcode model ids and never slice a platform id out of a
+    model id; every model carries an explicit `platform`. Agent setup
+    snippets live in `desktop/provider_presets.py` as a data-driven registry,
+    so any OpenAI-compatible desktop agent is one entry away and the UI is
+    never limited to a fixed list of products.
+12. **Provider settings surface** — Settings > Provider Server shows the
+    live server state, the base URL, the access key (show plus copy), a test
+    button and the exposed models. The key may only be rotated behind an
+    explicit user confirmation, and ChatBridge must never write into an
+    agent's own configuration file or `.env`; it produces a snippet and the
+    user merges it.
+13. **The DOM gate stays green** — `scripts/ui_dom_check.py` is the
+    acceptance gate for every UI edit: its pins must match the elements that
+    actually exist (no stale pins, no removed elements), it must read files
+    as UTF-8 so it also runs on Windows, and `desktop/ui/app.js` must not
+    build HTML strings for injection (`innerHTML` and friends stay banned).
+
 ## Session log
 
 - 2026-11-14 — created. Recorded the initial rules above after upgrading to
@@ -140,3 +159,27 @@ Key locations:
 - 2026-11-16 — released 2.70.0. Ran `python scripts/bump_version.py 2.70.0 --old 2.60.0`, `sync_installer_version.py`, `ver_check.py` ("Version markers are synchronized: 2.70.0"), `package_source.py`; full suite green (376 passed, 5 skipped). Bump script's default `--old` is 2.50.0, so always pass the real current version explicitly or it reports `changed: 0 file(s)`. Tagged `v2.70.0`.
 - 2026-11-16 — added in-app self-update (GitHub releases). New `desktop/updater.py`: `check_for_update()` hits the GitHub `/releases/latest` API with `urllib`, compares `tag_name` to `APP_VERSION`, and picks a portable `ChatBridge-*.exe` asset; `apply_update()` downloads it, stages a `cmd` batch in `%TEMP%\chatbridge-update` that waits for the PID, replaces the running EXE and relaunches. `Api.update_check`/`update_apply` wire it to the UI; on success the app calls `webview.stop()` then `os._exit(0)` so the batch can swap the locked file. Config gains `auto_update` (default True). UI: an `#updateBanner` under the header (Update now / Later) plus General-settings rows (`autoUpdateSwitch`, `checkUpdatesBtn`, `updateStatusText`); `checkUpdates()` runs automatically 1.2 s after bootstrap when `auto_update` is on. i18n keys added to en/fa. Rule: self-update only works in the frozen portable EXE (source checkout returns `not-frozen`); releases must attach the portable `ChatBridge-X.Y.Z.exe` asset for updates to work. Verified `py_compile` + `node --check` + full suite green (376 passed, 5 skipped).
 - 2026-11-16 — cancelled the untested working-tree changes after a coverage review: (a) the multi-attachment `send_message` in `desktop/app.py` (`attachments` was dead code — the UI only ever sends one attachment and the body still used `file = attachment`, so a multi-file message would have gone out with no file at all), (b) `multiple` on the composer file input in `desktop/ui/index.html` (no test references that file, and on its own it lets the UI collect several files while only the first is sent), (c) the extra Claude `send` selectors in `desktop/agent_cb.js` (the only test touching that file asserts three generic strings, never the selectors). Backup patch: `.chatbridge\uncovered_backup.patch`. New rule 10 below.
+- 2026-11-17 — completed the provider settings and agent onboarding. New
+  `desktop/provider_models.py` is the single source of truth for the exposed
+  models (built-in platforms plus user custom models, explicit platform
+  mapping, no string-slice mapping); new `desktop/provider_presets.py` holds
+  the data-driven registry of ready-to-paste snippets (opencode JSON,
+  Hermes YAML plus the `.env` line, generic JSON/YAML/env, curl) so any
+  OpenAI-compatible desktop agent can be added with one entry.
+  `desktop/provider_server.py` now serves the configured model list, answers
+  `GET /v1/models/<id>` and maps every model id to its browser platform.
+  `desktop/app.py` gained `provider_models()`, `provider_test()` and
+  `provider_key_rotate()`; Settings > Provider Server now shows live state,
+  copy buttons for base URL and key, a manual key rotation behind a
+  confirmation, the exposed model list and the agent snippet panel.
+  ChatBridge never writes into an agent config or `.env`; the user copies the
+  snippet. Verified: `pytest -q` green (394 passed, 5 skipped; +11 new tests
+  in `tests/test_provider_settings.py`), `node --check` green,
+  `scripts/ui_dom_check.py` green (186 ids, 246 locale keys).
+- 2026-11-17 — repaired the pre-existing red DOM gate. `scripts/ui_dom_check.py`
+  read files with the locale codec (UnicodeDecodeError on Windows), pinned
+  elements deleted on 2026-11-16 (`browserSplitter`, `bbLog`) and a `browser`
+  tab that no longer exists; all three are fixed. The last red assert was a
+  pre-existing `innerHTML` sink in the code highlighter, so `highlightCode()`
+  now returns DOM nodes (same spans and classes) and `updateLines()` uses
+  `replaceChildren()`; no HTML string is injected anymore.

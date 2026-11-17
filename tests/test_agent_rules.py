@@ -55,7 +55,9 @@ def test_builtin_rules_are_first_person_and_natural():
     combined = "\n".join(row["text"] for row in DEFAULT_RULES)
     for tool in ("read_file", "write_file", "list_dir", "search_files", "run_command"):
         assert tool in combined
-    assert '```chatbridge-tool-call\n{"tool":"read_file"' in combined
+    assert '```' not in combined
+    assert "one at a time" in combined
+    assert "chatbridge-tool-call" not in combined
 
 
 def test_edit_toggle_custom_add_delete_reset_and_persistence(tmp_path):

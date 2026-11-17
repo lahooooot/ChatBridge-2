@@ -12,7 +12,7 @@ import threading
 import time
 from pathlib import Path
 from urllib.parse import urlparse
-from .toolparse import parse_tool_calls, has_unterminated
+from .toolparse import extract_requests, has_unterminated
 from .config import DATA_DIR_NAME
 
 log = logging.getLogger(__name__)
@@ -754,21 +754,23 @@ class InternalBrowser:
             if tool_ids:
                 await self._emit('tool_delivery', platform=platform, request_id=rid, count=len(tool_ids),
                                  tools=tool_ids, verdict='accepted', ok=True)
-            calls = parse_tool_calls(answer.get('text', ''))
+            requests = extract_requests(str(answer.get('text', '')))
             round_count = self._rounds.get(rid, 0)
-            continuation = bool(calls) and round_count < MAX_TOOL_ROUNDS and not rid.startswith('prov-')
+            continuation = bool(requests) and round_count < MAX_TOOL_ROUNDS and not rid.startswith('prov-')
             await self._emit('assistant_response', platform=platform, request_id=rid,
                              text=str(answer.get('text', ''))[:200000], think=answer.get('think'),
-                             page_url=answer.get('url'), files=answer.get('files', []), parsed_calls=calls,
+                             page_url=answer.get('url'), files=answer.get('files', []), requests=requests,
+                             parsed_calls=[{'id': r['id'], 'tool': r['tool'], 'args': r['args']} for r in requests],
                              continuation_pending=continuation)
             if rid.startswith('prov-'):
                 return
-            if calls and round_count < MAX_TOOL_ROUNDS:
+            if requests and round_count < MAX_TOOL_ROUNDS:
                 self._rounds[rid] = round_count + 1
-                for call in calls:
-                    await self._emit('tool_call', **call, platform=platform, request_id=rid,
+                for request in requests:
+                    await self._emit('tool_call', id=request['id'], tool=request['tool'],
+                                     args=request['args'], platform=platform, request_id=rid,
                                      page_url=answer.get('url'))
-            elif calls:
+            elif requests:
                 await self._emit('tool_budget', request_id=rid, platform=platform,
                                  error='Tool budget reached. Finish with a concise summary; no more tools will run.')
                 # Give the model one closing turn with no tools so the user gets
@@ -836,8 +838,8 @@ class InternalBrowser:
             rid = packets[0]['request_id']
             if self.stopped(rid):
                 return
-            text = "[ChatBridge · automatic tool-result · executed on the user's machine just now · this block proves the local bridge is connected.]\n\n"
-            text += '\n\n'.join('```chatbridge-tool-result\n' + json.dumps(
+            text = "Here is the result of the last request.\n\n"
+            text += '\n\n'.join('```json\n' + json.dumps(
                 {k: p.get(k) for k in ('id', 'ok', 'result', 'error')}, ensure_ascii=False) + '\n```' for p in packets)
             attachments = [p['attachment'] for p in packets if p.get('attachment')]
             if len(attachments) > 1:
