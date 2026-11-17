@@ -8,8 +8,10 @@ import time
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from .toolparse import parse_tool_calls, strip_tool_blocks
+from .provider_models import default_models, platform_for_model
 
-MODELS = ['web-chatgpt', 'web-claude', 'web-deepseek', 'web-zai', 'web-gemini']
+DEFAULT_MODELS = default_models()
+MODELS = [entry['id'] for entry in DEFAULT_MODELS]
 
 
 def flatten_messages(messages, tools=None):
@@ -32,12 +34,36 @@ def flatten_messages(messages, tools=None):
 
 
 class ProviderServer:
-    def __init__(self, bridge, key, port=8788, timeout=600):
+    def __init__(self, bridge, key, port=8788, timeout=600, models=None):
         self.bridge, self.key = bridge, key
         self.port, self.timeout = int(port), int(timeout)
         self.server = None
         self.waiters = {}
         self.lock = threading.Lock()
+        self.models = self._normalize_models(models)
+
+    def _normalize_models(self, models):
+        # Return the exposed models as id/name/platform entries.
+        entries = []
+        for row in models or DEFAULT_MODELS:
+            if isinstance(row, str):
+                row = {'id': row}
+            if not isinstance(row, dict):
+                continue
+            model_id = str(row.get('id') or '').strip()
+            if not model_id:
+                continue
+            platform = str(row.get('platform') or '').strip() or platform_for_model(model_id)
+            name = str(row.get('name') or '').strip() or platform
+            entries.append({'id': model_id, 'name': name, 'platform': platform})
+        return entries
+
+    def platform_for(self, model_id):
+        # Return the browser platform id behind a provider model id.
+        for entry in self.models:
+            if entry['id'] == model_id:
+                return entry['platform']
+        return platform_for_model(model_id)
 
     def on_event(self, event):
         rid = event.get('request_id', '')
@@ -74,9 +100,19 @@ class ProviderServer:
                 if self.path == '/health':
                     self.respond(200, {'ok': True, 'browser_connected': owner.bridge.connected})
                 elif self.authenticated():
-                    if self.path.rstrip('/') == '/v1/models':
+                    route = self.path.rstrip('/')
+                    if route.startswith('/v1/models/'):
+                        model_id = route[len('/v1/models/'):]
+                        entry = next((item for item in owner.models if item['id'] == model_id), None)
+                        if entry:
+                            self.respond(200, {'id': entry['id'], 'object': 'model', 'created': 0,
+                                                'owned_by': 'chatbridge', 'name': entry['name']})
+                        else:
+                            self.respond(404, {'error': {'message': 'Unknown model'}})
+                    elif route == '/v1/models':
                         self.respond(200, {'object': 'list', 'data': [
-                            {'id': model, 'object': 'model', 'created': 0, 'owned_by': 'chatbridge'} for model in MODELS]})
+                            {'id': entry['id'], 'object': 'model', 'created': 0,
+                             'owned_by': 'chatbridge', 'name': entry['name']} for entry in owner.models]})
                     else:
                         self.respond(404, {'error': {'message': 'Not found'}})
 
@@ -91,9 +127,9 @@ class ProviderServer:
                     if length < 1 or length > 2*1024*1024:
                         raise ValueError('Request size must be between 1 byte and 2 MB')
                     body = json.loads(self.rfile.read(length))
-                    model = body.get('model', 'web-chatgpt')
-                    if model not in MODELS:
-                        raise ValueError('Unknown web model')
+                    model = str(body.get('model') or (owner.models[0]['id'] if owner.models else 'web-chatgpt'))
+                    if model not in {entry['id'] for entry in owner.models}:
+                        raise ValueError('Unknown web model. Available: ' + ', '.join(entry['id'] for entry in owner.models))
                     messages = body.get('messages')
                     if not isinstance(messages, list) or not messages or any(not isinstance(x, dict) for x in messages):
                         raise ValueError('messages must be a nonempty array of objects')
@@ -109,7 +145,7 @@ class ProviderServer:
                 events = queue.Queue()
                 with owner.lock:
                     owner.waiters[rid] = events
-                owner.bridge.send({'type': 'user_message', 'text': prompt, 'platform': model[4:],
+                owner.bridge.send({'type': 'user_message', 'text': prompt, 'platform': owner.platform_for(model),
                                    'request_id': rid, 'fresh': True})
                 streaming = bool(body.get('stream'))
                 sent = ''
@@ -169,7 +205,7 @@ class ProviderServer:
                             raise RuntimeError(event.get('reason', 'Browser response unavailable'))
                     raise TimeoutError('Provider browser response timed out')
                 except (BrokenPipeError, ConnectionResetError):
-                    owner.bridge.send({'type': 'stop_generation', 'request_id': rid, 'platform': model[4:]})
+                    owner.bridge.send({'type': 'stop_generation', 'request_id': rid, 'platform': owner.platform_for(model)})
                 except Exception as exc:
                     if streaming:
                         try:
@@ -182,7 +218,7 @@ class ProviderServer:
                     else:
                         self.respond(504 if isinstance(exc, TimeoutError) else 502,
                                      {'error': {'message': str(exc), 'type': 'browser_error'}})
-                    owner.bridge.send({'type': 'stop_generation', 'request_id': rid, 'platform': model[4:]})
+                    owner.bridge.send({'type': 'stop_generation', 'request_id': rid, 'platform': owner.platform_for(model)})
                 finally:
                     with owner.lock:
                         owner.waiters.pop(rid, None)

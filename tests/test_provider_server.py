@@ -46,6 +46,25 @@ def test_models_auth(provider):
     assert exc.value.code == 401
 
 
+def test_dynamic_models_and_single_model_endpoint():
+    bridge = FakeBridge()
+    models = [{'id': 'web-custom:reasoner', 'name': 'Reasoner', 'platform': 'custom:reasoner'}]
+    server = ProviderServer(bridge, 'test-key', port=0, timeout=1, models=models).start()
+    bridge.owner = server
+    try:
+        listed = json.load(request(server))['data']
+        assert [item['id'] for item in listed] == ['web-custom:reasoner']
+        detail = json.load(request(server, '/v1/models/web-custom:reasoner'))
+        assert detail['id'] == 'web-custom:reasoner'
+        assert detail['name'] == 'Reasoner'
+        assert server.platform_for('web-custom:reasoner') == 'custom:reasoner'
+        with pytest.raises(urllib.error.HTTPError) as exc:
+            request(server, '/v1/models/web-unknown')
+        assert exc.value.code == 404
+    finally:
+        server.stop()
+
+
 def test_completion(provider):
     server, bridge = provider
     value = json.load(request(server, '/v1/chat/completions', {'model':'web-chatgpt','messages':[{'role':'user','content':'Hello'}]}))

@@ -8,10 +8,12 @@ import logging
 import mimetypes
 import os
 import re
+import secrets
 import subprocess
 import sys
 import threading
 import time
+import urllib.request
 import uuid
 import zipfile
 from pathlib import Path
@@ -32,6 +34,8 @@ from .chatfolder import create_chat_folder
 from .audit import AuditLog
 from .internal_browser import InternalBrowser, PLATFORM_HOME, profile_path
 from .provider_server import ProviderServer
+from .provider_models import BUILTIN_PLATFORM_NAMES, build_models
+from . import provider_presets
 from .toolparse import parse_tool_calls, strip_tool_blocks
 from .tools._extended import HANDLERS as EXTENDED_TOOLS
 from . import updater
@@ -418,14 +422,14 @@ class Api:
     @guarded
     def bootstrap(self):
         config = self.config.get()
-        platforms = [{'id': key, 'name': {'chatgpt': 'ChatGPT', 'claude': 'Claude', 'zai': 'z.ai',
-                        'deepseek': 'DeepSeek', 'gemini': 'Gemini'}[key], 'home': home}
+        platforms = [{'id': key, 'name': BUILTIN_PLATFORM_NAMES.get(key, key), 'home': home}
                      for key, home in PLATFORM_HOME.items()]
         platforms.extend(config.get('custom_models', []))
         return {'ok': True, 'version': APP_VERSION, 'config': config, 'state': self.config.load_state(),
                 'platforms': platforms, 'project': self.project,
                 'provider': {'enabled': bool(self.provider), 'port': config.get('provider_port', 8788),
-                             'key': config.get('provider_key')},
+                             'key': config.get('provider_key'), 'running': bool(self.provider),
+                             'models': self._provider_model_rows()},
                 'status': {'connected': self.bridge.connected}}
 
     @guarded
@@ -793,7 +797,16 @@ class Api:
     def _start_provider(self):
         config = self.config.get()
         self.provider = ProviderServer(self.bridge, config['provider_key'], config.get('provider_port', 8788),
-                                       config.get('provider_timeout', 600)).start()
+                                       config.get('provider_timeout', 600),
+                                       models=self._provider_model_rows()).start()
+
+    def _provider_model_rows(self):
+        # Return the provider models that follow the configured platforms.
+        config = self.config.get()
+        platforms = [{'id': key, 'name': BUILTIN_PLATFORM_NAMES.get(key, key), 'home': home}
+                     for key, home in PLATFORM_HOME.items()]
+        platforms.extend(config.get('custom_models', []))
+        return build_models(platforms)
 
     @guarded
     def provider_set(self, enabled, port=8788):
@@ -806,6 +819,48 @@ class Api:
                 self._start_provider()
             return {'enabled': bool(self.provider), 'port': int(port)}
         return self._spawn(apply, kind='provider_status')
+
+    @guarded
+    def provider_models(self):
+        # Return the exposed models, the endpoint and the agent presets.
+        config = self.config.get()
+        port = int(config.get('provider_port', 8788))
+        key = str(config.get('provider_key') or '')
+        base_url = 'http://127.0.0.1:%d/v1' % port
+        models = self._provider_model_rows()
+        return {'ok': True, 'base_url': base_url, 'port': port, 'models': models,
+                'running': bool(self.provider),
+                'presets': provider_presets.list_presets(base_url, key, models)}
+
+    @guarded
+    def provider_test(self):
+        # Ask the local endpoint what a client would see right now.
+        config = self.config.get()
+        port = int(config.get('provider_port', 8788))
+        key = str(config.get('provider_key') or '')
+        result = {'ok': False, 'running': bool(self.provider), 'models': [], 'error': ''}
+        try:
+            request = urllib.request.Request('http://127.0.0.1:%d/v1/models' % port,
+                                             headers={'Authorization': 'Bearer ' + key})
+            with urllib.request.urlopen(request, timeout=5) as response:
+                payload = json.loads(response.read().decode('utf-8'))
+            result['models'] = [str(row.get('id')) for row in payload.get('data', [])
+                                if isinstance(row, dict)]
+            result['ok'] = True
+        except Exception as exc:
+            result['error'] = str(exc)
+        return result
+
+    @guarded
+    def provider_key_rotate(self):
+        # Generate a new access key and restart the server with it.
+        key = secrets.token_urlsafe(32)
+        self.config.update({'provider_key': key})
+        if self.provider:
+            self.provider.stop()
+            self.provider = None
+            self._start_provider()
+        return {'ok': True, 'key': key}
 
 
 def acquire_single_instance(base):

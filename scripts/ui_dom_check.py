@@ -38,9 +38,9 @@ class Document(HTMLParser):
 
 
 def main():
-    html = (UI / 'index.html').read_text()
-    js = (UI / 'app.js').read_text()
-    css = (UI / 'style.css').read_text()
+    html = (UI / 'index.html').read_text(encoding='utf-8')
+    js = (UI / 'app.js').read_text(encoding='utf-8')
+    css = (UI / 'style.css').read_text(encoding='utf-8')
     doc = Document()
     doc.feed(html)
     required = {
@@ -48,19 +48,24 @@ def main():
         'sidebar', 'sidebarToggle', 'fullAccessSwitch', 'accessWarning', 'chatList',
         'chatPanel', 'chatStream', 'approvalHost', 'composerForm', 'composerInput',
         'sendBtn', 'attachBtn', 'attachmentInput', 'attachmentHost', 'rightBlock',
-        'rightSplitter', 'browserSplitter', 'ibDock', 'ibDockEmpty', 'ibDockOpen',
-        'bbLog', 'browserUrl', 'fileTree', 'fileFilter', 'fileEditor', 'editorSaveBtn',
+        'rightSplitter', 'ibDock', 'ibDockEmpty', 'ibDockOpen',
+        'browserUrl', 'fileTree', 'fileFilter', 'fileEditor', 'editorSaveBtn',
         'editorDirty', 'lineNumbers', 'terminalOutput', 'terminalKillBtn',
         'terminalRerunBtn', 'terminalSendBtn', 'gitChanges', 'gitDiff', 'confirmModal',
         'settingsModal', 'browserSettings', 'agentRulesList', 'agentRulesMaster',
         'addRuleBtn', 'resetRulesBtn', 'rulesPreview', 'rulesPreviewBtn',
+        'providerSwitch', 'providerPort', 'providerTimeout', 'providerKey', 'providerStatus',
+        'providerEndpoint', 'providerBaseUrl', 'providerModels', 'providerRefreshBtn',
+        'providerCopyUrlBtn', 'providerRevealBtn', 'providerCopyKeyBtn', 'providerRotateBtn',
+        'providerState', 'providerTestBtn', 'providerPresetTabs', 'providerPresetNote',
+        'providerSnippet', 'providerCopySnippetBtn',
     }
     assert not required - doc.ids.keys(), f'Missing pins: {required - doc.ids.keys()}'
     assert 'hidden' not in doc.ids['ibOpenBtn'][1], 'Header browser button is gated'
     assert doc.radios == 0, 'Radio controls are forbidden'
     assert 'iframe' not in doc.tags, 'Embedded third-party frames are forbidden'
     assert doc.categories == {'general', 'appearance', 'models', 'internal-browser', 'provider', 'agent-rules'}
-    assert doc.tabs == {'browser', 'files', 'terminal', 'git', 'file'}
+    assert doc.tabs == {'files', 'terminal', 'git', 'file'}
     assert '2.71.0' in html and '<html lang="en" dir="ltr"' in html
     assert not re.search(r'browser_mode|chrome\.|extension/', html + js, re.I)
     assert not re.search(r'\.innerHTML\s*=|insertAdjacentHTML|document\.write\(|\beval\(', js)
@@ -73,7 +78,7 @@ def main():
     assert all(f'data-font-size="{size}"' in css for size in ('small', 'large', 'extra-large'))
     catalogs = {}
     for locale in ('en', 'fa'):
-        catalogs[locale] = json.loads((ROOT / 'desktop' / 'translations' / f'{locale}.json').read_text())
+        catalogs[locale] = json.loads((ROOT / 'desktop' / 'translations' / f'{locale}.json').read_text(encoding='utf-8'))
         missing = doc.translations - catalogs[locale].keys()
         assert not missing, f'{locale}: Missing translations {missing}'
     assert catalogs['en'].keys() == catalogs['fa'].keys(), 'Catalog key sets differ'
@@ -85,5 +90,8 @@ if __name__ == '__main__':
     try:
         sys.exit(main())
     except AssertionError as error:
-        print(f'FAIL: {error}', file=sys.stderr)
+        tb = error.__traceback__
+        while tb.tb_next:
+            tb = tb.tb_next
+        print(f'FAIL at line {tb.tb_lineno}: {error}', file=sys.stderr)
         sys.exit(1)

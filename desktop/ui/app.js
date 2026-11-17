@@ -37,6 +37,10 @@
   const previewApi = {
     async bootstrap(){return {ok:true,version:'2.71.0',config:readLocal('cb.preview.config',config),state:readLocal('cb.preview.state',{}),platforms:homes,status:{connected:false},provider:{enabled:false,port:8788,key:''}};},
     async drain_events(){return {ok:true,events:[]};},
+    async provider_models(){return {ok:false,error:'provider-unavailable-in-preview',models:[],presets:[]};},
+    async provider_test(){return {ok:false,error:'provider-unavailable-in-preview',models:[],running:false};},
+    async provider_key_rotate(){return {ok:false,error:'provider-unavailable-in-preview'};},
+    async provider_set(){return {ok:false,error:'provider-unavailable-in-preview',enabled:false,port:8788};},
     async state_save(value){writeLocal('cb.preview.state',value);return {ok:true};},
     async config_set(patch){config={...config,...patch};writeLocal('cb.preview.config',config);return {ok:true,config};},
     async agent_rules_get(){return {ok:true,rules:copy(config.agent_rules),on:config.agent_rules_on};},
@@ -98,6 +102,45 @@
     document.documentElement.style.setProperty('--code-font',`"${state.code_font}",Consolas,monospace`);
     $('themeSelect').value=state.theme;$('fontSizeSelect').value=state.font_size;$('codeFont').value=state.code_font;$('languageSelect').value=state.language;
   }
+  let providerInfo = {base_url:'',models:[],presets:[],running:false,error:''};
+  let providerPreset = '';
+  function renderProvider(){
+    const base = providerInfo.base_url || `http://127.0.0.1:${config.provider_port || 8788}/v1`;
+    $('providerEndpoint').textContent = base;
+    $('providerBaseUrl').textContent = base;
+    $('providerModels').textContent = (providerInfo.models||[]).map(m=>m.id+' ('+m.name+')').join(', ') || t('provider_no_models');
+    $('providerState').textContent = providerInfo.error ? t('provider_test_failed')+': '+providerInfo.error : (providerInfo.running ? t('provider_running') : t('provider_stopped'));
+    renderProviderPresets();
+  }
+  function renderProviderPresets(){
+    const host = $('providerPresetTabs');
+    host.replaceChildren();
+    const presets = providerInfo.presets || [];
+    if(!presets.some(p=>p.id===providerPreset)) providerPreset = presets[0] ? presets[0].id : '';
+    for(const preset of presets){
+      const button = node('button', preset.label, 'text-button');
+      button.type = 'button';
+      button.dataset.preset = preset.id;
+      button.addEventListener('click', ()=>{providerPreset = preset.id; renderProviderPresets();});
+      host.append(button);
+    }
+    const active = presets.find(p=>p.id===providerPreset);
+    $('providerPresetNote').textContent = active ? (active.note || '') : '';
+    $('providerSnippet').value = active ? (active.snippet || '') : '';
+  }
+  async function refreshProvider(){
+    try{
+      const result = await call('provider_models');
+      providerInfo = {base_url: result.base_url || '', models: result.models || [], presets: result.presets || [], running: Boolean(result.running), error: ''};
+    }catch(error){
+      providerInfo = {...providerInfo, error: String((error && error.message) || error)};
+    }
+    renderProvider();
+  }
+  async function copyToClipboard(text, message){
+    try{await navigator.clipboard.writeText(String(text || ''));toast(message || t('provider_copied'));}
+    catch(_){toast(t('provider_copy_failed'), true);}
+  }
   function renderConfig() {
     setSwitch('fullAccessSwitch',config.full_access);$('accessWarning').hidden=!config.full_access;
     $('approvalTimeout').value=config.approval_timeout || 120;$('wsPort').value=config.ws_port || 8787;
@@ -105,6 +148,7 @@
     $('providerKey').value=config.provider_key || '';$('providerKey').placeholder=t('provider_key_missing');
     $('providerStatus').textContent=t(config.provider_enabled?'provider_enabled':'provider_disabled');
     $('providerEndpoint').textContent=`http://127.0.0.1:${config.provider_port || 8788}/v1`;
+    renderProvider();
     setSwitch('dockStartupSwitch',state.dock_on_startup);$('whatsNewBtn').hidden=Boolean(config.updates_seen);
     setSwitch('autoUpdateSwitch',config.auto_update!==false);
   }
@@ -343,7 +387,7 @@
       case 'error':toast(event.error || event.message || t('error'),true);break;
       case 'notice':toast(event.text || event.message || '');break;
       case 'generation_stopped':if(c)setBusy(c,false);break;
-      case 'provider_status':if(event.ok===false)toast(event.error || t('error'),true);else {config.provider_enabled=Boolean(event.enabled ?? event.result?.enabled);config.provider_port=event.port || event.result?.port || config.provider_port;renderConfig();}break;
+      case 'provider_status':if(event.ok===false)toast(event.error || t('error'),true);else {config.provider_enabled=Boolean(event.enabled ?? event.result?.enabled);config.provider_port=event.port || event.result?.port || config.provider_port;renderConfig();refreshProvider();}break;
       case 'logs_exported':if(event.ok===false)toast(event.error || t('error'),true);else toast(`${t('logs_exported')}: ${event.path || event.result?.path || ''}`);break;
       case 'file_saved':if(event.ok===false)toast(event.error || t('error'),true);else toast(`${t('save_success')}: ${event.path || event.result?.path || ''}`);break;
       case 'message_queued':if(event.ok===false){if(c)setBusy(c,false);toast(event.error || t('request_failed'),true);}break;
@@ -506,7 +550,7 @@
   async function previewRules(){await saveRules();const result=await call('agent_rules_preview',[$('rulesPreviewInput').value]);$('rulesPreview').textContent=result.text || '';}
   async function bootstrap(force=false) {
     if(booting || (ready&&!force))return;booting=true;
-    try {const result=await call('bootstrap');config={...config,...result.config};normalizeState(result.state);if(Array.isArray(result.platforms)&&result.platforms.length)result.platforms.forEach(p=>{if(!homes.some(h=>h.id===p.id)&&!config.custom_models.some(m=>m.id===p.id))config.custom_models.push(p);});if(result.provider)config={...config,provider_enabled:result.provider.enabled ?? config.provider_enabled,provider_port:result.provider.port || config.provider_port,provider_key:result.provider.key || config.provider_key};
+    try {const result=await call('bootstrap');config={...config,...result.config};normalizeState(result.state);if(Array.isArray(result.platforms)&&result.platforms.length)result.platforms.forEach(p=>{if(!homes.some(h=>h.id===p.id)&&!config.custom_models.some(m=>m.id===p.id))config.custom_models.push(p);});if(result.provider)config={...config,provider_enabled:result.provider.enabled ?? config.provider_enabled,provider_port:result.provider.port || config.provider_port,provider_key:result.provider.key || config.provider_key};await refreshProvider();
       if(result.project&&!chat().project)chat().project=result.project;if(chat()?.project){state.projects=Array.isArray(state.projects)?state.projects:[];if(!state.projects.some(x=>x.id===chat().project.id))state.projects.push(chat().project);}
       applyAppearance();await window.CBI18n.set(state.language);renderModels();renderConfig();renderChats();renderProject();renderStream();ready=true;if(state.dock_on_startup===false)state.right_hidden=true;setTab(state.active_tab); // restore hidden preference after tab activation
       state.right_hidden=Boolean(result.state?.right_hidden || state.dock_on_startup===false);state.browser_hidden=Boolean(result.state?.browser_hidden);state.utility_hidden=Boolean(result.state?.utility_hidden);fitLayout();updateStatus(result.status || {});rules=copy(config.agent_rules || builtinRules);rulesOn=config.agent_rules_on!==false;renderRules();renderTerminal();$('globalStatus').textContent=t('local_ready');
@@ -549,11 +593,19 @@
   ['settingsBtn','sidebarSettingsBtn'].forEach(id=>bind(id,'click',()=>openSettings()));bind('settingsCloseBtn','click',()=>{$('settingsModal').close();sendIbFit();});$('settingsModal').addEventListener('close',sendIbFit);document.querySelectorAll('[data-category]').forEach(el=>el.addEventListener('click',()=>setCategory(el.dataset.category)));
   bind('languageSelect','change',async()=>{state.language=$('languageSelect').value;await window.CBI18n.set(state.language);renderChats();renderProject();renderStream();renderModels();renderConfig();renderRules();updateStatus({connected,browser_open:browserOpened});persist();sendIbFit();});
   [['themeSelect','theme'],['fontSizeSelect','font_size'],['codeFont','code_font']].forEach(([id,key])=>bind(id,'change',()=>{state[key]=$(id).value;applyAppearance();persist();sendIbFit();}));
-  [['approvalTimeout','approval_timeout'],['wsPort','ws_port'],['providerTimeout','provider_timeout']].forEach(([id,key])=>bind(id,'change',()=>{const input=$(id);if(!input.checkValidity()){input.reportValidity();return;}return patchConfig({[key]:Number(input.value)});}));
+  [['approvalTimeout','approval_timeout'],['wsPort','ws_port']].forEach(([id,key])=>bind(id,'change',()=>{const input=$(id);if(!input.checkValidity()){input.reportValidity();return;}return patchConfig({[key]:Number(input.value)});}));
+  bind('providerTimeout','change',async()=>{const input=$('providerTimeout');if(!input.checkValidity()){input.reportValidity();return;}await patchConfig({provider_timeout:Number(input.value)});if(config.provider_enabled){await call('provider_set',[true,Number(config.provider_port||8788)]);}renderConfig();});
   bind('dockStartupSwitch','click',()=>{state.dock_on_startup=!switchOn('dockStartupSwitch');setSwitch('dockStartupSwitch',state.dock_on_startup);persist();});
   bind('settingsBrowserOpen','click',async()=>{$('settingsModal').close();return window.__cbOpenInternalBrowser();});bind('settingsBrowserClose','click',async()=>{await call('ibrowser_close');browserOpened=false;updateStatus({connected:false,browser_open:false});});
   bind('profileResetBtn','click',async()=>{if(await confirm(t('profile_reset_title'),t('profile_reset_confirm')))await call('browser_reset_profile');});
   bind('providerSwitch','click',async()=>{const enabled=!switchOn('providerSwitch'),port=Number($('providerPort').value);const result=await call('provider_set',[enabled,port]);config.provider_enabled=enabled;config.provider_port=port;if(result.key)config.provider_key=result.key;renderConfig();});bind('providerPort','change',async()=>{if(!$('providerPort').checkValidity())return;const port=Number($('providerPort').value);await call('provider_set',[Boolean(config.provider_enabled),port]);config.provider_port=port;renderConfig();});
+  bind('providerRefreshBtn','click',()=>refreshProvider());
+  bind('providerCopyUrlBtn','click',()=>copyToClipboard(providerInfo.base_url || `http://127.0.0.1:${config.provider_port || 8788}/v1`, t('provider_copied')));
+  bind('providerCopyKeyBtn','click',()=>copyToClipboard(config.provider_key || '', t('provider_copied')));
+  bind('providerRevealBtn','click',()=>{const input=$('providerKey');const show=input.type==='password';input.type=show?'text':'password';$('providerRevealBtn').textContent=t(show?'provider_hide':'provider_reveal');});
+  bind('providerRotateBtn','click',async()=>{if(!await confirm(t('provider_rotate_title'),t('provider_rotate_confirm')))return;const result=await call('provider_key_rotate');if(result&&result.key){config.provider_key=result.key;renderConfig();toast(t('provider_key_rotated'));await refreshProvider();}});
+  bind('providerTestBtn','click',async()=>{const result=await call('provider_test');if(result&&result.ok){toast(t('provider_test_ok'));await refreshProvider();}else{toast(t('provider_test_failed')+': '+((result&&result.error)||t('error')),true);}});
+  bind('providerCopySnippetBtn','click',()=>copyToClipboard($('providerSnippet').value, t('provider_copied')));
   const hintState={model:null,host:'',editors:[],sends:[],saved:false};
   function hintStep(id,state,note){const el=$(id);if(!el)return;el.dataset.state=state;if(note){const n=el.querySelector('small');if(n)n.textContent=note;}}
   function hostFromHome(home){try{return new URL(home).hostname.toLowerCase();}catch(_){return '';}}
