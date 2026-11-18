@@ -1,5 +1,6 @@
 import json
 import threading
+import time
 import urllib.request
 import urllib.error
 import pytest
@@ -105,3 +106,84 @@ def test_validation_and_offline(provider):
 
 def test_flatten_tool_messages():
     assert 'result' in flatten_messages([{'role':'tool','content':'result'}])
+
+
+def test_model_names_accept_the_provider_prefix_and_any_case(provider):
+    # Real clients ask for "chatbridge/web-chatgpt" (the id the opencode
+    # snippet advertises) while others send the bare id or a different case.
+    # All three must reach the same web platform instead of a 400.
+    server, bridge = provider
+    for model_name in ('web-chatgpt', 'chatbridge/web-chatgpt', 'WEB-ChatGPT'):
+        value = json.load(request(server, '/v1/chat/completions',
+                                  {'model': model_name,
+                                   'messages': [{'role': 'user', 'content': 'Hi'}]}))
+        assert value['choices'][0]['message']['content'] == bridge.answer
+        assert bridge.packets[-1]['platform'] == 'chatgpt'
+
+
+def test_a_request_opens_the_browser_when_the_driver_is_missing():
+    bridge = FakeBridge()
+    bridge.connected = False
+    opened = []
+
+    def ensure_browser(platform):
+        opened.append(platform)
+        bridge.connected = True
+
+    server = ProviderServer(bridge, 'test-key', port=0, timeout=5,
+                            ensure_browser=ensure_browser, connect_wait=2).start()
+    bridge.owner = server
+    try:
+        value = json.load(request(server, '/v1/chat/completions',
+                                  {'model': 'web-chatgpt',
+                                   'messages': [{'role': 'user', 'content': 'Hi'}]}))
+        assert value['choices'][0]['message']['content'] == bridge.answer
+        assert opened == ['chatgpt']
+        assert bridge.packets[0]['type'] == 'user_message'
+    finally:
+        server.stop()
+
+
+def test_a_browser_that_never_connects_fails_fast_with_503():
+    bridge = FakeBridge()
+    bridge.connected = False
+    server = ProviderServer(bridge, 'test-key', port=0, timeout=5,
+                            ensure_browser=lambda platform: None, connect_wait=0.2).start()
+    bridge.owner = server
+    started = time.monotonic()
+    try:
+        with pytest.raises(urllib.error.HTTPError) as exc:
+            request(server, '/v1/chat/completions',
+                    {'messages': [{'role': 'user', 'content': 'Hi'}]})
+        assert exc.value.code == 503
+        assert time.monotonic() - started < 5
+        assert 'internal browser' in server.status()['last_error'].lower()
+    finally:
+        server.stop()
+
+
+def test_health_and_status_expose_the_live_state(provider):
+    server, _bridge = provider
+    with urllib.request.urlopen(f'http://127.0.0.1:{server.port}/health', timeout=4) as response:
+        health = json.load(response)
+    assert health['ok'] is True
+    assert health['running'] is True
+    assert 'web-chatgpt' in health['models']
+    snapshot = server.status()
+    assert snapshot['running'] is True
+    assert snapshot['served'] == 0
+    assert snapshot['models'] == [entry['id'] for entry in server.models]
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        request(server, '/v1/chat/completions',
+                {'model': 'web-nope', 'messages': [{'role': 'user', 'content': 'Hi'}]})
+    assert exc.value.code == 400
+    assert 'web-nope' in server.status()['last_error']
+    assert server.status()['last_request']['ok'] is False
+
+
+def test_status_counts_successful_turns(provider):
+    server, _bridge = provider
+    json.load(request(server, '/v1/chat/completions',
+                      {'model': 'web-chatgpt', 'messages': [{'role': 'user', 'content': 'Hi'}]}))
+    assert server.status()['served'] == 1
+    assert server.status()['last_request']['ok'] is True

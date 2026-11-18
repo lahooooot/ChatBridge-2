@@ -177,6 +177,33 @@ def test_provider_test_and_key_rotation(tmp_path):
             api.provider.stop()
 
 
+def test_provider_models_reports_a_live_status_snapshot(tmp_path):
+    api = Api(tmp_path / 'data')
+    result = api.provider_models()
+    status = result['status']
+    assert status['running'] is False
+    assert status['browser_connected'] is False
+    assert status['served'] == 0
+    assert status['last_request'] is None
+    assert 'web-chatgpt' in status['models']
+
+
+def test_provider_probe_without_a_running_server_reports_a_failure(tmp_path):
+    api = Api(tmp_path / 'data')
+    spawned = api.provider_probe('')
+    assert spawned['ok'] and spawned['id']
+    deadline = time.monotonic() + 5
+    events = []
+    while time.monotonic() < deadline:
+        events.extend(api.sink.drain())
+        if any(event.get('type') == 'provider_probe_result' for event in events):
+            break
+        time.sleep(0.02)
+    result = next(event for event in events if event.get('type') == 'provider_probe_result')
+    assert result['ok'] is False
+    assert 'provider' in result['error'].lower()
+
+
 def test_provider_settings_markup_and_bindings_exist():
     html = (ROOT / 'desktop' / 'ui' / 'index.html').read_text(encoding='utf-8')
     js = (ROOT / 'desktop' / 'ui' / 'app.js').read_text(encoding='utf-8')
@@ -185,11 +212,28 @@ def test_provider_settings_markup_and_bindings_exist():
                        'providerRefreshBtn', 'providerCopyUrlBtn', 'providerRevealBtn',
                        'providerCopyKeyBtn', 'providerRotateBtn', 'providerState',
                        'providerTestBtn', 'providerPresetTabs', 'providerPresetNote',
-                       'providerSnippet', 'providerCopySnippetBtn'):
+                       'providerSnippet', 'providerCopySnippetBtn',
+                       'providerStatusDot', 'providerHeadline', 'providerCheckServer',
+                       'providerCheckBrowser', 'providerCheckModels', 'providerProbeBtn',
+                       'providerProbeResult', 'providerConfigPathRow', 'providerConfigPath',
+                       'providerCopyPathBtn'):
         assert 'id="' + element_id + '"' in html
-    for method in ('provider_models', 'provider_test', 'provider_key_rotate'):
+    for method in ('provider_models', 'provider_test', 'provider_key_rotate', 'provider_probe'):
         assert "'" + method + "'" in js
+    assert "bind('providerProbeBtn'" in js and "bind('providerCopyPathBtn'" in js
+    assert "case 'provider_probe_result'" in js
     assert 'innerHTML' not in js
+
+
+def test_provider_status_card_is_styled_for_every_state():
+    css = (ROOT / 'desktop' / 'ui' / 'style.css').read_text(encoding='utf-8')
+    for selector in ('.provider-status-card', '.provider-status-dot',
+                     '.provider-status-dot[data-state="ok"]',
+                     '.provider-status-dot[data-state="warn"]',
+                     '.provider-checks li[data-state="warn"] .provider-check-icon',
+                     '.provider-probe-result[data-state="error"]',
+                     '.provider-preset-tab.active', '.provider-config-path[hidden]'):
+        assert selector in css
 
 
 def test_every_ui_translation_key_exists_in_both_catalogs():
@@ -207,5 +251,24 @@ def test_every_ui_translation_key_exists_in_both_catalogs():
                 'provider_no_models', 'provider_refresh', 'provider_state', 'provider_running',
                 'provider_stopped', 'provider_test', 'provider_test_ok', 'provider_test_failed',
                 'provider_connect_agent', 'provider_copy_snippet', 'provider_copied',
-                'provider_copy_failed'):
+                'provider_copy_failed', 'provider_probe', 'provider_probe_ok',
+                'provider_probe_failed', 'provider_probe_reply', 'provider_ready',
+                'provider_waiting_browser', 'provider_browser_connected',
+                'provider_browser_offline', 'provider_models_ready', 'provider_agent_steps',
+                'provider_key_hint', 'provider_copy_path', 'provider_no_config_path',
+                'provider_group_general', 'provider_group_connection',
+                'provider_group_security', 'provider_group_status'):
         assert key in catalogs['en'] and key in catalogs['fa']
+
+
+def test_offline_bundle_mirrors_the_json_catalogs():
+    # i18n.js falls back to this embedded snapshot when fetch() is blocked
+    # (restricted file origins), so a new key must land in both places or the
+    # offline UI silently shows raw key names.
+    js = (ROOT / 'desktop' / 'ui' / 'i18n.js').read_text(encoding='utf-8')
+    match = re.search(r'window\.__CB_BUNDLED_TRANSLATIONS = (\{.*\});', js)
+    assert match, 'Bundled translations are missing'
+    bundle = json.loads(match.group(1))
+    for locale in ('en', 'fa'):
+        catalog = json.loads((ROOT / 'desktop' / 'translations' / f'{locale}.json').read_text(encoding='utf-8'))
+        assert bundle[locale] == catalog, locale + ': bundled snapshot is stale'

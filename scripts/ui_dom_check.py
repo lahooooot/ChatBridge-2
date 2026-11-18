@@ -59,6 +59,9 @@ def main():
         'providerCopyUrlBtn', 'providerRevealBtn', 'providerCopyKeyBtn', 'providerRotateBtn',
         'providerState', 'providerTestBtn', 'providerPresetTabs', 'providerPresetNote',
         'providerSnippet', 'providerCopySnippetBtn',
+        'providerStatusDot', 'providerHeadline', 'providerCheckServer', 'providerCheckBrowser',
+        'providerCheckModels', 'providerProbeBtn', 'providerProbeResult',
+        'providerConfigPathRow', 'providerConfigPath', 'providerCopyPathBtn',
     }
     assert not required - doc.ids.keys(), f'Missing pins: {required - doc.ids.keys()}'
     assert 'hidden' not in doc.ids['ibOpenBtn'][1], 'Header browser button is gated'

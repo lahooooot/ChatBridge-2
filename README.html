@@ -62,7 +62,7 @@ The canonical Python parser handles fenced JSON, raw string control-character re
 
 ## Provider server
 
-Enable the provider in Settings. It binds to `127.0.0.1:8788`, exposes `GET /v1/models`, `GET /v1/models/&lt;id&gt;` and `POST /v1/chat/completions`, and uses the generated key shown in the UI. The internal browser must be open and signed in. The exposed models follow the models you configured: each built-in web chat and each custom model appears as `web-&lt;platform id&gt;` (`web-chatgpt`, `web-claude`, `web-deepseek`, `web-zai`, `web-gemini`, plus your own custom ones).
+Enable the provider in Settings. It binds to `127.0.0.1:8788`, exposes `GET /health`, `GET /v1/models`, `GET /v1/models/&lt;id&gt;` and `POST /v1/chat/completions`, and uses the generated key shown in the UI. The internal browser must be signed in to the web model you ask for; if it is not open, the first request opens it and waits briefly for the driver to connect before returning `503`. Client model names are forgiving: `web-chatgpt`, `chatbridge/web-chatgpt` and any letter case all resolve to the same exposed model. The exposed models follow the models you configured: each built-in web chat and each custom model appears as `web-&lt;platform id&gt;` (`web-chatgpt`, `web-claude`, `web-deepseek`, `web-zai`, `web-gemini`, plus your own custom ones).
 
 ```python
 from openai import OpenAI
@@ -83,6 +83,13 @@ Settings &gt; Provider Server has a **Connect an agent** panel. It shows the bas
 URL, the access key and the exposed model ids, and generates a ready-to-paste
 provider block for the agent you use. ChatBridge never edits an agent&#x27;s own
 configuration; copy the snippet and merge it yourself.
+
+The top of the section is a live status card: the local server, the internal
+browser and the exposed-model checks, a **Test connection** button that reads
+`GET /v1/models` back with the current key, and a **Send test message** button
+that pushes one real completion through the internal browser and shows the web
+reply. If a client gets no answer, send a test message first — it shows the
+exact stage that fails instead of leaving you to guess.
 
 - **opencode** — merge the `provider.chatbridge` block into
   `~/.config/opencode/opencode.json` (JSON).

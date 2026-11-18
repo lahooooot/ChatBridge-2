@@ -103,14 +103,34 @@
     document.documentElement.style.setProperty('--code-font',`"${state.code_font}",Consolas,monospace`);
     $('themeSelect').value=state.theme;$('fontSizeSelect').value=state.font_size;$('codeFont').value=state.code_font;$('languageSelect').value=state.language;
   }
-  let providerInfo = {base_url:'',models:[],presets:[],running:false,error:''};
+  let providerInfo = {base_url:'',models:[],presets:[],running:false,status:{},error:''};
   let providerPreset = '';
+  function providerCheck(id,state,detail){
+    const el = $(id);if(!el)return;
+    el.dataset.state = state;
+    const small = el.querySelector('.provider-check-detail');
+    if(small)small.textContent = detail || '';
+  }
   function renderProvider(){
     const base = providerInfo.base_url || `http://127.0.0.1:${config.provider_port || 8788}/v1`;
+    const status = providerInfo.status || {};
+    const running = Boolean(providerInfo.running);
+    const browserReady = Boolean(status.browser_connected);
+    const modelCount = (providerInfo.models||[]).length;
     $('providerEndpoint').textContent = base;
     $('providerBaseUrl').textContent = base;
-    $('providerModels').textContent = (providerInfo.models||[]).map(m=>m.id+' ('+m.name+')').join(', ') || t('provider_no_models');
-    $('providerState').textContent = providerInfo.error ? t('provider_test_failed')+': '+providerInfo.error : (providerInfo.running ? t('provider_running') : t('provider_stopped'));
+    $('providerModels').textContent = (providerInfo.models||[]).map(m=>m.id).join(', ') || t('provider_no_models');
+    let headline = 'provider_disabled', headState = 'off';
+    if(providerInfo.error){headline = 'provider_test_failed';headState = 'error';}
+    else if(!running){headline = 'provider_disabled';headState = 'off';}
+    else if(!browserReady){headline = 'provider_waiting_browser';headState = 'warn';}
+    else {headline = 'provider_ready';headState = 'ok';}
+    $('providerHeadline').textContent = t(headline);
+    $('providerStatusDot').dataset.state = headState;
+    providerCheck('providerCheckServer', running?'ok':'off', running?t('provider_running'):t('provider_stopped'));
+    providerCheck('providerCheckBrowser', browserReady?'ok':(running?'warn':'off'), browserReady?t('provider_browser_connected'):t('provider_browser_offline'));
+    providerCheck('providerCheckModels', modelCount?'ok':'warn', modelCount?t('provider_models_ready',{count:modelCount}):t('provider_no_models'));
+    $('providerState').textContent = providerInfo.error ? t('provider_test_failed')+': '+providerInfo.error : (running ? t('provider_running') : t('provider_stopped'));
     renderProviderPresets();
   }
   function renderProviderPresets(){
@@ -119,7 +139,7 @@
     const presets = providerInfo.presets || [];
     if(!presets.some(p=>p.id===providerPreset)) providerPreset = presets[0] ? presets[0].id : '';
     for(const preset of presets){
-      const button = node('button', preset.label, 'text-button');
+      const button = node('button', preset.label, 'provider-preset-tab' + (preset.id===providerPreset?' active':''));
       button.type = 'button';
       button.dataset.preset = preset.id;
       button.addEventListener('click', ()=>{providerPreset = preset.id; renderProviderPresets();});
@@ -128,11 +148,14 @@
     const active = presets.find(p=>p.id===providerPreset);
     $('providerPresetNote').textContent = active ? (active.note || '') : '';
     $('providerSnippet').value = active ? (active.snippet || '') : '';
+    const path = active && active.config_path ? active.config_path : '';
+    $('providerConfigPath').textContent = path || t('provider_no_config_path');
+    $('providerConfigPathRow').hidden = !path;
   }
   async function refreshProvider(){
     try{
       const result = await call('provider_models');
-      providerInfo = {base_url: result.base_url || '', models: result.models || [], presets: result.presets || [], running: Boolean(result.running), error: ''};
+      providerInfo = {base_url: result.base_url || '', models: result.models || [], presets: result.presets || [], running: Boolean(result.running), status: result.status || {}, error: ''};
     }catch(error){
       providerInfo = {...providerInfo, error: String((error && error.message) || error)};
     }
@@ -209,6 +232,7 @@
     $('ibDockEmpty').hidden=Boolean(browserOpened && nativeApi() && status.browser_open!==false);
     $('demoNotice').hidden=Boolean(nativeApi());
     $('bridgeMode').textContent=nativeApi()?'NATIVE':hasInjectedApi?'TEST API':t('preview');
+    if(hasConnection && providerInfo && providerInfo.status){providerInfo.status.browser_connected=connected;if($('settingsModal').open)renderProvider();}
     sendIbFit();
   }
   // Defense in depth only. Tool objects are supplied separately by Python and never parsed here.
@@ -389,6 +413,7 @@
       case 'notice':toast(event.text || event.message || '');break;
       case 'generation_stopped':if(c)setBusy(c,false);break;
       case 'provider_status':if(event.ok===false)toast(event.error || t('error'),true);else {config.provider_enabled=Boolean(event.enabled ?? event.result?.enabled);config.provider_port=event.port || event.result?.port || config.provider_port;renderConfig();refreshProvider();}break;
+      case 'provider_probe_result':{const out=$('providerProbeResult');if(!out)break;out.hidden=false;if(event.ok===false){out.dataset.state='error';out.textContent=`${t('provider_probe_failed')}: ${event.error || t('error')}`;toast(t('provider_probe_failed'),true);}else{out.dataset.state='ok';out.textContent=event.reply?`${t('provider_probe_reply')}: ${event.reply}`:t('provider_probe_ok');toast(t('provider_probe_ok'));}refreshProvider();break;}
       case 'logs_exported':if(event.ok===false)toast(event.error || t('error'),true);else toast(`${t('logs_exported')}: ${event.path || event.result?.path || ''}`);break;
       case 'file_saved':if(event.ok===false)toast(event.error || t('error'),true);else toast(`${t('save_success')}: ${event.path || event.result?.path || ''}`);break;
       case 'message_queued':if(event.ok===false){if(c)setBusy(c,false);toast(event.error || t('request_failed'),true);}break;
@@ -545,7 +570,7 @@
   function handleGitResult(event){const job=gitJobs.get(event.id);gitJobs.delete(event.id);if(event.ok===false){toast(event.error || t('error'),true);return;}const result=event.result;if(job?.action==='diff')$('gitDiff').textContent=typeof result==='string'?result:result?.diff || result?.stdout || JSON.stringify(result,null,2);else if(job?.action==='branches')renderBranches(Array.isArray(result)?result:result?.branches || [],chat()?.project?.branch);else {if(result?.stdout)toast(result.stdout);refreshGit().catch(()=>{});}}
   function confirm(title,text) {return new Promise(resolve=>{const dialog=$('confirmModal');if(dialog.open){resolve(false);return;}$('confirmTitle').textContent=title;$('confirmText').textContent=text;const finish=answer=>{dialog.close();$('confirmAccept').removeEventListener('click',yes);$('confirmCancel').removeEventListener('click',no);dialog.removeEventListener('cancel',cancel);sendIbFit();resolve(answer);};const yes=()=>finish(true),no=()=>finish(false),cancel=e=>{e.preventDefault();finish(false);};$('confirmAccept').addEventListener('click',yes);$('confirmCancel').addEventListener('click',no);dialog.addEventListener('cancel',cancel);dialog.showModal();sendIbFit();$('confirmCancel').focus();});}
   async function openSettings(category='general'){setCategory(category);if(!$('settingsModal').open)$('settingsModal').showModal();renderConfig();applyAppearance();sendIbFit();if(!rules.length&&!rulesDirty)await loadRules();}
-  function setCategory(category){document.querySelectorAll('[data-category]').forEach(el=>el.classList.toggle('active',el.dataset.category===category));document.querySelectorAll('[data-settings]').forEach(el=>el.hidden=el.dataset.settings!==category);}
+  function setCategory(category){document.querySelectorAll('[data-category]').forEach(el=>el.classList.toggle('active',el.dataset.category===category));document.querySelectorAll('[data-settings]').forEach(el=>el.hidden=el.dataset.settings!==category);if(category==='provider')refreshProvider();}
   async function loadRules(){const result=await call('agent_rules_get');rules=copy(result.rules || []);rulesOn=result.on!==false;rulesDirty=false;renderRules();}
   function renderRules(){setSwitch('agentRulesMaster',rulesOn);const host=$('agentRulesList');host.replaceChildren();for(const rule of rules){const row=node('div',undefined,`rule-row${rule.enabled===false?' disabled':''}`);row.dataset.ruleId=rule.id;const toggle=node('button',undefined,'switch');toggle.setAttribute('role','switch');toggle.setAttribute('aria-checked',String(rule.enabled!==false));toggle.setAttribute('aria-label',t('rule_enabled'));const content=node('div',undefined,'rule-content');content.append(node('span',t(rule.builtin?'builtin_rule':'custom_rule'),'rule-meta'));const input=node('textarea');input.value=rule.text || '';input.rows=3;input.setAttribute('aria-label',t('rule_text'));input.addEventListener('input',()=>{rule.text=input.value;queueRulesSave();});content.append(input);const remove=node('button','×','icon-button danger-text');remove.title=t('delete_rule');remove.setAttribute('aria-label',t('delete_rule'));remove.addEventListener('click',()=>{rules=rules.filter(r=>r.id!==rule.id);renderRules();queueRulesSave();});toggle.addEventListener('click',()=>{rule.enabled=rule.enabled===false;toggle.setAttribute('aria-checked',String(rule.enabled));row.classList.toggle('disabled',!rule.enabled);queueRulesSave();});row.append(toggle,content,remove);host.append(row);}}
   function localRulesPreview(){const prompt=$('rulesPreviewInput').value;const body=rulesOn?rules.filter(r=>r.enabled!==false).map(r=>r.text).filter(Boolean).join('\n\n'):'';$('rulesPreview').textContent=[prompt,body].filter(Boolean).join('\n\n');}
@@ -595,7 +620,7 @@
   bind('terminalRerunBtn','click',()=>{const job=jobs.get(currentTerminal);if(job)return runTerminal(job.cmd,job.cwd);});bind('terminalSendBtn','click',async()=>{if(!currentTerminal){toast(t('no_terminal'),true);return;}await call('terminal_send',[currentTerminal,platform(),chat().id]);toast(t('send_result_success'));});
   bind('gitRefreshBtn','click',refreshGit);document.querySelectorAll('[data-git]').forEach(el=>el.addEventListener('click',()=>gitAction(el.dataset.git,{}).catch(()=>{})));bind('gitCommitBtn','click',async()=>{const message=$('commitMessage').value.trim();if(!message){toast(t('commit_empty'),true);return;}await gitAction('commit',{message});});bind('jiraTemplateBtn','click',()=>{const key=$('jiraKey').value.trim();if(key)$('commitMessage').value=`${key}: ${$('commitMessage').value.replace(/^[A-Z]+-\d+:\s*/, '')}`;});bind('gitBranches','focus',()=>{if($('gitBranches').options.length<=1)return gitAction('branches',{});});bind('gitBranches','change',()=>gitAction('checkout',{branch:$('gitBranches').value}));
   ['settingsBtn','sidebarSettingsBtn'].forEach(id=>bind(id,'click',()=>openSettings()));bind('settingsCloseBtn','click',()=>{$('settingsModal').close();sendIbFit();});$('settingsModal').addEventListener('close',sendIbFit);document.querySelectorAll('[data-category]').forEach(el=>el.addEventListener('click',()=>setCategory(el.dataset.category)));
-  bind('languageSelect','change',async()=>{state.language=$('languageSelect').value;await window.CBI18n.set(state.language);renderChats();renderProject();renderStream();renderModels();renderConfig();renderRules();updateStatus({connected,browser_open:browserOpened});persist();sendIbFit();});
+  bind('languageSelect','change',async()=>{state.language=$('languageSelect').value;await window.CBI18n.set(state.language);renderChats();renderProject();renderStream();renderModels();renderConfig();renderProvider();renderRules();updateStatus({connected,browser_open:browserOpened});persist();sendIbFit();});
   [['themeSelect','theme'],['fontSizeSelect','font_size'],['codeFont','code_font']].forEach(([id,key])=>bind(id,'change',()=>{state[key]=$(id).value;applyAppearance();persist();sendIbFit();}));
   [['approvalTimeout','approval_timeout'],['wsPort','ws_port']].forEach(([id,key])=>bind(id,'change',()=>{const input=$(id);if(!input.checkValidity()){input.reportValidity();return;}return patchConfig({[key]:Number(input.value)});}));
   bind('providerTimeout','change',async()=>{const input=$('providerTimeout');if(!input.checkValidity()){input.reportValidity();return;}await patchConfig({provider_timeout:Number(input.value)});if(config.provider_enabled){await call('provider_set',[true,Number(config.provider_port||8788)]);}renderConfig();});
@@ -609,6 +634,8 @@
   bind('providerRevealBtn','click',()=>{const input=$('providerKey');const show=input.type==='password';input.type=show?'text':'password';$('providerRevealBtn').textContent=t(show?'provider_hide':'provider_reveal');});
   bind('providerRotateBtn','click',async()=>{if(!await confirm(t('provider_rotate_title'),t('provider_rotate_confirm')))return;const result=await call('provider_key_rotate');if(result&&result.key){config.provider_key=result.key;renderConfig();toast(t('provider_key_rotated'));await refreshProvider();}});
   bind('providerTestBtn','click',async()=>{const result=await call('provider_test');if(result&&result.ok){toast(t('provider_test_ok'));await refreshProvider();}else{toast(t('provider_test_failed')+': '+((result&&result.error)||t('error')),true);}});
+  bind('providerProbeBtn','click',async()=>{const out=$('providerProbeResult');const show=(state,text)=>{if(!out)return;out.hidden=false;out.dataset.state=state;out.textContent=text;};show('pending',t('provider_probe')+'…');try{await call('provider_probe',[(providerInfo.models||[])[0]?.id || ''],{quiet:true});}catch(error){show('error',t('provider_probe_failed')+': '+String(error.message||error));}});
+  bind('providerCopyPathBtn','click',()=>copyToClipboard(($('providerConfigPath')?.textContent||'').trim(), t('provider_copied')));
   bind('providerCopySnippetBtn','click',()=>copyToClipboard($('providerSnippet').value, t('provider_copied')));
   const hintState={model:null,host:'',editors:[],sends:[],saved:false};
   function hintStep(id,state,note){const el=$(id);if(!el)return;el.dataset.state=state;if(note){const n=el.querySelector('small');if(n)n.textContent=note;}}

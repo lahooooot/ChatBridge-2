@@ -805,7 +805,8 @@ class Api:
         config = self.config.get()
         self.provider = ProviderServer(self.bridge, config['provider_key'], config.get('provider_port', 8788),
                                        config.get('provider_timeout', 600),
-                                       models=self._provider_model_rows()).start()
+                                       models=self._provider_model_rows(),
+                                       ensure_browser=self._browser.open).start()
 
     def _provider_model_rows(self):
         # Return the provider models that follow the configured platforms.
@@ -835,8 +836,12 @@ class Api:
         key = str(config.get('provider_key') or '')
         base_url = 'http://127.0.0.1:%d/v1' % port
         models = self._provider_model_rows()
+        status = self.provider.status() if self.provider else {
+            'running': False, 'browser_connected': bool(self.bridge.connected),
+            'served': 0, 'last_error': '', 'last_request': None,
+            'models': [row['id'] for row in models]}
         return {'ok': True, 'base_url': base_url, 'port': port, 'models': models,
-                'running': bool(self.provider),
+                'running': bool(self.provider), 'status': status,
                 'presets': provider_presets.list_presets(base_url, key, models)}
 
     @guarded
@@ -845,7 +850,9 @@ class Api:
         config = self.config.get()
         port = int(config.get('provider_port', 8788))
         key = str(config.get('provider_key') or '')
-        result = {'ok': False, 'running': bool(self.provider), 'models': [], 'error': ''}
+        result = {'ok': False, 'running': bool(self.provider),
+                  'browser_connected': bool(self.bridge.connected),
+                  'models': [], 'error': ''}
         try:
             request = urllib.request.Request('http://127.0.0.1:%d/v1/models' % port,
                                              headers={'Authorization': 'Bearer ' + key})
@@ -857,6 +864,36 @@ class Api:
         except Exception as exc:
             result['error'] = str(exc)
         return result
+
+    @guarded
+    def provider_probe(self, model=''):
+        # Send one tiny completion through the whole chain so the user can see
+        # exactly where it stops: HTTP server -> bridge -> internal browser ->
+        # web chat -> back. Runs in the background and reports an event.
+        config = self.config.get()
+        port = int(config.get('provider_port', 8788))
+        key = str(config.get('provider_key') or '')
+        models = self._provider_model_rows()
+        model_id = str(model or '').strip() or (models[0]['id'] if models else '')
+        timeout = max(30, min(int(config.get('provider_timeout', 600)), 240))
+
+        def probe():
+            if not self.provider:
+                raise ValueError('Enable the provider server first.')
+            if not model_id:
+                raise ValueError('There is no exposed model to test yet.')
+            payload = json.dumps({'model': model_id, 'messages': [{
+                'role': 'user',
+                'content': 'Hello! Please reply with one short sentence so I can confirm the connection.'}]}).encode('utf-8')
+            request = urllib.request.Request('http://127.0.0.1:%d/v1/chat/completions' % port, data=payload,
+                                             headers={'Authorization': 'Bearer ' + key,
+                                                      'Content-Type': 'application/json'})
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                body = json.loads(response.read().decode('utf-8'))
+            choice = (body.get('choices') or [{}])[0]
+            reply = (choice.get('message') or {}).get('content') or ''
+            return {'ok': True, 'model': model_id, 'reply': reply[:2000]}
+        return self._spawn(probe, kind='provider_probe_result', model=model_id)
 
     @guarded
     def provider_key_rotate(self):

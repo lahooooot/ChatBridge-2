@@ -6,6 +6,27 @@ and the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- Provider requests no longer fail silently when the internal browser was never
+  opened. `POST /v1/chat/completions` now opens the browser itself, waits for
+  the driver to connect, and only returns `503 browser_unavailable` when it
+  really cannot connect, with a message that says what to do.
+- The provider accepts the model name a client actually sends: `web-chatgpt`,
+  the provider-qualified `chatbridge/web-chatgpt`, and any letter case all
+  resolve to the same exposed model instead of `400 Unknown web model`.
+
+### Added
+- `GET /health` reports the server and browser state plus the exposed models.
+- `provider_probe()` sends one real completion through the whole chain
+  (HTTP → bridge → internal browser → web chat) and reports the reply, so the
+  settings panel can show where a client request stops.
+- A live status card at the top of Settings > Provider Server: server, internal
+  browser and exposed-model checks, a **Send test message** button and the web
+  reply. The section is now grouped as General, Connection, Security, Server
+  status and Connect an agent.
+- The provider section is fully translated to Persian, including the group
+  headings and the security note.
+
 ## [2.71.0] - 2026-11-11
 
 ### Added
