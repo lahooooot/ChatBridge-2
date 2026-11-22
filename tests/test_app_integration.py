@@ -5,7 +5,7 @@ from desktop.app import Api, decode_data, data_url
 def test_bootstrap_without_native_dependencies(tmp_path):
     api = Api(tmp_path/'data')
     boot = api.bootstrap()
-    assert boot['ok'] and boot['version'] == '2.71.0'
+    assert boot['ok'] and boot['version'] == '2.80.0'
     assert len(boot['platforms']) == 5
     assert not boot['status']['connected']
     assert boot['config']['full_access']
@@ -122,3 +122,100 @@ def test_pywebview_api_keeps_native_browser_private(tmp_path):
     api = Api(tmp_path/'data')
     assert 'browser' not in api.__dict__
     assert api.__dict__.get('_browser') is not None
+
+
+def test_paste_execute_runs_tool_and_emits_result(tmp_path):
+    root = tmp_path/'workspace'
+    root.mkdir()
+    (root/'hello.txt').write_text('hi')
+    api = Api(tmp_path/'data')
+    api._browser.open = lambda platform: None
+    assert api.project_attach(str(root))['ok']
+    packets = []
+    api.bridge.send = packets.append
+    result = api.paste_execute('{"tool": "read_file", "args": {"path": "hello.txt"}}')
+    assert result['ok'] and result['tool'] == 'read_file'
+    deadline = time.monotonic() + 3
+    finished = None
+    while time.monotonic() < deadline:
+        for event in api.drain_events()['events']:
+            if event.get('type') == 'tool_finished' and event.get('id') == result['id']:
+                finished = event
+        if finished:
+            break
+        time.sleep(.03)
+    assert finished and finished['ok']
+    assert finished['result']['content'] == 'hi'
+    assert any(p.get('type') == 'tool_result' and p.get('ok') for p in packets)
+
+
+def test_paste_execute_treats_plain_text_as_run_command(tmp_path):
+    root = tmp_path/'workspace'
+    root.mkdir()
+    api = Api(tmp_path/'data')
+    api._browser.open = lambda platform: None
+    assert api.project_attach(str(root))['ok']
+    api.bridge.send = lambda packet: None
+    result = api.paste_execute('echo pasted-ok')
+    assert result['ok'] and result['tool'] == 'run_command'
+
+
+def test_paste_execute_requires_project(tmp_path):
+    api = Api(tmp_path/'data')
+    try:
+        result = api.paste_execute('echo hi')
+    except ValueError as error:
+        assert 'project' in str(error).lower()
+    else:
+        assert result['ok'] is False and 'project' in result['error'].lower()
+
+
+def test_token_warning_fires_and_auto_summary_requests_a_prompt(tmp_path):
+    api = Api(tmp_path/'data')
+    api._browser.open = lambda platform: None
+    packets = []
+    api.bridge.send = packets.append
+    api.requests['r'] = {'chat_id': 'c', 'workspace': None, 'heartbeat': 0, 'stopped': False}
+    api.last_platforms['c'] = 'chatgpt'
+    big = ' '.join(['word'] * 4000)
+    api._event({'type': 'assistant_response', 'request_id': 'r', 'text': big, 'page_url': 'https://chatgpt.com/c/1'})
+    events = api.drain_events()['events']
+    warning = next(e for e in events if e['type'] == 'token_warning')
+    assert warning['auto'] is True
+    assert warning['estimate'] >= warning['limit']
+    # The auto path fired a summary prompt through the bridge.
+    assert any(p.get('type') == 'user_message' and 'CB-SUMMARY' in p.get('text', '') for p in packets)
+    assert 'c' in api._summary_inflight
+
+
+def test_summary_accept_marks_chat_fresh_and_resets_estimate(tmp_path):
+    root = tmp_path/'workspace'
+    root.mkdir()
+    api = Api(tmp_path/'data')
+    api._browser.open = lambda platform: None
+    assert api.project_attach(str(root))['ok']
+    api.bridge.send = lambda packet: None
+    api._pending_summary = {'c': ('chatgpt', 'the handoff text')}
+    api.chat_urls['c'] = 'https://chatgpt.com/c/old'
+    api._token_estimate['c'] = 4200.0
+    api._token_limit_stopped.add('c')
+    result = api.summary_accept('c')
+    assert result['ok']
+    assert 'c' not in api._pending_summary
+    assert 'c' not in api.chat_urls
+    assert api._token_estimate['c'] == 0.0
+    assert 'c' not in api._token_limit_stopped
+
+
+def test_token_limit_stop_suppresses_further_auto_summary(tmp_path):
+    api = Api(tmp_path/'data')
+    api._browser.open = lambda platform: None
+    api.bridge.send = lambda packet: None
+    api.requests['r'] = {'chat_id': 'c', 'workspace': None, 'heartbeat': 0, 'stopped': False}
+    api.last_platforms['c'] = 'chatgpt'
+    assert api.token_limit_stop('c')['ok']
+    big = ' '.join(['word'] * 4000)
+    api._event({'type': 'assistant_response', 'request_id': 'r', 'text': big, 'page_url': 'https://chatgpt.com/c/1'})
+    events = api.drain_events()['events']
+    assert not any(e['type'] == 'token_warning' for e in events)
+    assert 'c' not in api._summary_inflight

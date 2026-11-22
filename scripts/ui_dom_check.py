@@ -62,6 +62,8 @@ def main():
         'providerStatusDot', 'providerHeadline', 'providerCheckServer', 'providerCheckBrowser',
         'providerCheckModels', 'providerProbeBtn', 'providerProbeResult',
         'providerConfigPathRow', 'providerConfigPath', 'providerCopyPathBtn',
+        'pasteBtn', 'pasteModal', 'pasteInput', 'pasteStatus', 'pasteCancel', 'pasteRun',
+        'tokenLimitInput',
     }
     assert not required - doc.ids.keys(), f'Missing pins: {required - doc.ids.keys()}'
     assert 'hidden' not in doc.ids['ibOpenBtn'][1], 'Header browser button is gated'
@@ -69,7 +71,7 @@ def main():
     assert 'iframe' not in doc.tags, 'Embedded third-party frames are forbidden'
     assert doc.categories == {'general', 'appearance', 'models', 'internal-browser', 'provider', 'agent-rules'}
     assert doc.tabs == {'files', 'terminal', 'git', 'file'}
-    assert '2.71.0' in html and '<html lang="en" dir="ltr"' in html
+    assert '2.80.0' in html and '<html lang="en" dir="ltr"' in html
     assert not re.search(r'browser_mode|chrome\.|extension/', html + js, re.I)
     assert not re.search(r'\.innerHTML\s*=|insertAdjacentHTML|document\.write\(|\beval\(', js)
     assert '__cbIbDockRect' in js and '__cbOpenInternalBrowser' in js

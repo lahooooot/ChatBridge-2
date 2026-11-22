@@ -36,7 +36,7 @@
   const copy = value => JSON.parse(JSON.stringify(value));
   // The preview adapter only implements local preferences; live features return honest errors.
   const previewApi = {
-    async bootstrap(){return {ok:true,version:'2.71.0',config:readLocal('cb.preview.config',config),state:readLocal('cb.preview.state',{}),platforms:homes,status:{connected:false},provider:{enabled:false,port:8788,key:''}};},
+    async bootstrap(){return {ok:true,version:'2.80.0',config:readLocal('cb.preview.config',config),state:readLocal('cb.preview.state',{}),platforms:homes,status:{connected:false},provider:{enabled:false,port:8788,key:''}};},
     async drain_events(){return {ok:true,events:[]};},
     async provider_models(){return {ok:false,error:'provider-unavailable-in-preview',models:[],presets:[]};},
     async provider_test(){return {ok:false,error:'provider-unavailable-in-preview',models:[],running:false};},
@@ -167,7 +167,7 @@
   }
   function renderConfig() {
     setSwitch('fullAccessSwitch',config.full_access);$('accessWarning').hidden=!config.full_access;
-    $('approvalTimeout').value=config.approval_timeout || 120;$('wsPort').value=config.ws_port || 8787;
+    $('approvalTimeout').value=config.approval_timeout || 120;$('wsPort').value=config.ws_port || 8787;$('tokenLimitInput').value=config.token_limit || 4000;
     setSwitch('providerSwitch',config.provider_enabled);$('providerPort').value=config.provider_port || 8788;$('providerTimeout').value=config.provider_timeout || 600;
     $('providerKey').value=config.provider_key || '';$('providerKey').placeholder=t('provider_key_missing');
     $('providerStatus').textContent=t(config.provider_enabled?'provider_enabled':'provider_disabled');
@@ -182,6 +182,7 @@
     for(const p of platforms){const option=node('option',p.name || p.id);option.value=p.id;$('modelSelect').append(option);
       const row=node('div',undefined,'model-row');const title=node('div');title.append(node('span',p.name || p.id),node('small',p.home || ''));
       row.append(node('span','◎','muted'),title);
+      const limit=node('input');limit.type='number';limit.min='500';limit.max='50000';limit.className='token-limit-input';limit.placeholder=String(config.token_limit || 4000);limit.value=(config.token_limits && config.token_limits[p.id]) || '';limit.title=t('token_limit') || 'Conversation token limit';limit.addEventListener('change',async()=>{const value=limit.value.trim();const next={...config.token_limits};if(value)next[p.id]=Number(value);else delete next[p.id];try{await patchConfig({token_limits:next});limit.title=`${t('token_limit') || 'Conversation token limit'} · ${value || config.token_limit}`;}catch(_){limit.value=(config.token_limits && config.token_limits[p.id]) || '';}});row.append(limit);
       if(String(p.id).startsWith('c_')){const detect=node('button','⌕','icon-button');detect.title='Detect this site';detect.addEventListener('click',()=>openHintModal(p));row.append(detect);const remove=node('button','×','icon-button danger-text');remove.title=t('remove_model');remove.addEventListener('click',async()=>{if(await confirm(t('remove_model'),t('remove_model_confirm'))){await patchConfig({custom_models:config.custom_models.filter(m=>m.id!==p.id)});renderModels();}});row.append(remove);}else row.append(node('span','WEB','badge'));
       $('modelsList').append(row);
     }
@@ -418,6 +419,9 @@
       case 'file_saved':if(event.ok===false)toast(event.error || t('error'),true);else toast(`${t('save_success')}: ${event.path || event.result?.path || ''}`);break;
       case 'message_queued':if(event.ok===false){if(c)setBusy(c,false);toast(event.error || t('request_failed'),true);}break;
       case 'tool_budget':{const message=state.language==='fa'?'سقف ۱۶ دور ابزار رسید. نتیجه‌های صف‌شده تحویل می‌شوند؛ ابزار تازه‌ای برای این پیام اجرا نمی‌شود.':'The 16-round tool budget was reached. Pending results will be delivered; no new tools will run for this message.';toast(event.message || message);const banner=$('limitBanner');banner.replaceChildren(node('p',event.message || message));banner.hidden=false;break;}
+      case 'token_warning':{const host=$('limitBanner');const note=node('p',state.language==='fa'?`تخمین توکن گفتگو به ${event.estimate} از ${event.limit} رسید. ${event.auto?'خلاصه‌سازی خودکار انجام می‌شود.':'نزدیک سقف هستیم.'}`:`Conversation token estimate is ${event.estimate} of ${event.limit}. ${event.auto?'Auto-summary will run.':'You are close to the limit.'}`);const stop=node('button',state.language==='fa'?'متوقف کن':'Stop','secondary');const run=node('button',state.language==='fa'?'همین حالا خلاصه کن':'Summarize now','primary');const row=node('div');row.style.cssText='display:flex;gap:8px;margin-top:8px';row.append(stop,run);stop.addEventListener('click',async()=>{try{await call('token_limit_stop',[event.chat_id || chat().id]);host.replaceChildren(node('p',state.language==='fa'?'خلاصه‌سازی خودکار متوقف شد. هر وقت خواستید دکمهٔ «خلاصه کن» را بزنید.':'Automatic summarization stopped. Use "Summarize now" whenever you want.'));toast(state.language==='fa'?'متوقف شد':'Stopped');}catch(error){toast(error.message,true);}});run.addEventListener('click',async()=>{try{await call('summarize_now',[event.chat_id || chat().id]);toast(state.language==='fa'?'درخواست خلاصه ارسال شد.':'Summary requested.');}catch(error){toast(error.message,true);}});host.replaceChildren(note,row);host.hidden=false;break;}
+      case 'summary_migrate':{const host=$('limitBanner');const note=node('p',state.language==='fa'?'خلاصه آماده است. می‌خواهید به چت جدید با قوانین پروژه منتقل شود؟':'A handoff summary is ready. Move it to a new chat with your project rules?');const preview=node('details');preview.append(node('summary',state.language==='fa'?'پیش‌نمایش خلاصه':'Summary preview'),node('pre',event.preview || ''));const yes=node('button',state.language==='fa'?'برو به چت جدید':'Go to new chat','primary');const later=node('button',t('cancel'),'secondary');const row=node('div');row.style.cssText='display:flex;gap:8px;margin-top:8px';row.append(yes,later);yes.addEventListener('click',async()=>{try{await call('summary_accept',[event.chat_id]);host.hidden=true;toast(state.language==='fa'?'چت جدید با خلاصه آغاز شد.':'New chat started with the summary.');}catch(error){toast(error.message,true);}});later.addEventListener('click',()=>{host.hidden=true;});host.replaceChildren(note,preview,row);host.hidden=false;break;}
+      case 'summary_failed':toast(state.language==='fa'?'خلاصه‌سازی ناموفق بود.':'Summary failed.',true);break;
       default:if(event.ok===false&&event.error)toast(event.error,true);
     }
   }
@@ -451,7 +455,7 @@
     const _ucb=$('utilityCollapseBtn');if(_ucb){_ucb.textContent=state.utility_hidden?'⌃':'⌄';_ucb.title=state.utility_hidden?t('expand_tools'):t('collapse_tools');_ucb.setAttribute('aria-label',_ucb.title);}
   }
   window.__cbIbDockRect = () => {
-    const rect=$('ibDock').getBoundingClientRect();const visible=!state.browser_hidden&&!$('settingsModal').open&&!$('confirmModal').open&&!$('hintModal').open&&browserOpened&&rect.width>0&&rect.height>0&&!document.hidden;
+    const rect=$('ibDock').getBoundingClientRect();const visible=!state.browser_hidden&&!$('settingsModal').open&&!$('confirmModal').open&&!$('hintModal').open&&!$('pasteModal').open&&browserOpened&&rect.width>0&&rect.height>0&&!document.hidden;
     return {x:Math.max(0,rect.left),y:Math.max(0,rect.top),w:Math.max(0,rect.width),h:Math.max(0,rect.height),visible,cw:window.innerWidth,ch:window.innerHeight};
   };
   function sendIbFit() {
@@ -604,6 +608,10 @@
   bind('rightSidebarToggle','click',()=>{state.right_hidden=!state.right_hidden;fitLayout();persist();});
   const toggleToolsDock=()=>{state.right_hidden=!state.right_hidden;fitLayout();persist();};
   bind('hideBrowserBlock','click',toggleToolsDock);bind('dockCollapseBtn','click',toggleToolsDock);
+  const openPaste=()=>{if(!state.project_path){toast(t('project_required'),true);return;}$('pasteInput').value='';$('pasteStatus').textContent='';$('pasteModal').showModal();sendIbFit();$('pasteInput').focus();};
+  bind('pasteBtn','click',openPaste);
+  bind('pasteCancel','click',()=>$('pasteModal').close());$('pasteModal').addEventListener('close',sendIbFit);
+  bind('pasteRun','click',async()=>{const text=$('pasteInput').value.trim();if(!text){$('pasteStatus').textContent=t('paste_empty');return;}$('pasteRun').disabled=true;$('pasteStatus').textContent=t('paste_running');try{const result=await call('paste_execute',[text]);$('pasteStatus').textContent=t('paste_started')+' ('+result.tool+')';$('pasteModal').close();toast(t('paste_started'));}catch(error){$('pasteStatus').textContent=error.message;}finally{$('pasteRun').disabled=false;}});
   bind('browserCollapseBtn','click',()=>{state.browser_hidden=!state.browser_hidden;fitLayout();persist();});bind('utilityCollapseBtn','click',()=>{state.utility_hidden=!state.utility_hidden;fitLayout();persist();});
   document.querySelectorAll('[data-tab]').forEach(el=>el.addEventListener('click',()=>setTab(el.dataset.tab)));
   bind('urlForm','submit',async e=>{e.preventDefault();const url=safeUrl($('browserUrl').value);if(!url||!/^https?:/.test(url)){toast('Use an http or https URL.',true);return;}await call('browser_nav',['navigate',url]);});
@@ -622,7 +630,7 @@
   ['settingsBtn','sidebarSettingsBtn'].forEach(id=>bind(id,'click',()=>openSettings()));bind('settingsCloseBtn','click',()=>{$('settingsModal').close();sendIbFit();});$('settingsModal').addEventListener('close',sendIbFit);document.querySelectorAll('[data-category]').forEach(el=>el.addEventListener('click',()=>setCategory(el.dataset.category)));
   bind('languageSelect','change',async()=>{state.language=$('languageSelect').value;await window.CBI18n.set(state.language);renderChats();renderProject();renderStream();renderModels();renderConfig();renderProvider();renderRules();updateStatus({connected,browser_open:browserOpened});persist();sendIbFit();});
   [['themeSelect','theme'],['fontSizeSelect','font_size'],['codeFont','code_font']].forEach(([id,key])=>bind(id,'change',()=>{state[key]=$(id).value;applyAppearance();persist();sendIbFit();}));
-  [['approvalTimeout','approval_timeout'],['wsPort','ws_port']].forEach(([id,key])=>bind(id,'change',()=>{const input=$(id);if(!input.checkValidity()){input.reportValidity();return;}return patchConfig({[key]:Number(input.value)});}));
+  [['approvalTimeout','approval_timeout'],['wsPort','ws_port'],['tokenLimitInput','token_limit']].forEach(([id,key])=>bind(id,'change',()=>{const input=$(id);if(!input.checkValidity()){input.reportValidity();return;}return patchConfig({[key]:Number(input.value)});}));
   bind('providerTimeout','change',async()=>{const input=$('providerTimeout');if(!input.checkValidity()){input.reportValidity();return;}await patchConfig({provider_timeout:Number(input.value)});if(config.provider_enabled){await call('provider_set',[true,Number(config.provider_port||8788)]);}renderConfig();});
   bind('dockStartupSwitch','click',()=>{state.dock_on_startup=!switchOn('dockStartupSwitch');setSwitch('dockStartupSwitch',state.dock_on_startup);persist();});
   bind('settingsBrowserOpen','click',async()=>{$('settingsModal').close();return window.__cbOpenInternalBrowser();});bind('settingsBrowserClose','click',async()=>{await call('ibrowser_close');browserOpened=false;updateStatus({connected:false,browser_open:false});});

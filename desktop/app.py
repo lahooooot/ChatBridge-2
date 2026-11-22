@@ -1,4 +1,4 @@
-"""ChatBridge 2.71.0 entry point and pywebview API."""
+"""ChatBridge 2.80.0 entry point and pywebview API."""
 from __future__ import annotations
 import base64
 import functools
@@ -40,7 +40,7 @@ from .toolparse import extract_requests, strip_tool_blocks
 from .tools._extended import HANDLERS as EXTENDED_TOOLS
 from . import updater
 
-APP_VERSION = '2.71.0'
+APP_VERSION = '2.80.0'
 WORKSPACE_TOOLS = (
     'read_file', 'write_file', 'list_dir', 'search_files', 'run_command',
     'edit_file', 'stat_file', 'append_file', 'make_dir', 'delete_file',
@@ -55,6 +55,20 @@ APPROVAL_TOOLS = frozenset({
     'snapshot', 'rollback', 'run_tests', 'http_fetch', 'process_control',
 })
 MAX_FILE = 15 * 1024 * 1024
+# Conversation budget. The web chat does not expose token counts, so the sum
+# of both sides of the transcript is estimated from words. The warn threshold
+# raises the UI banner; the limit is where the automatic summary fires.
+TOKEN_WARN = 3400
+TOKEN_LIMIT = 3900
+TOKEN_PER_WORD = 1.3
+SUMMARY_MARKER = 'CB-SUMMARY'
+SUMMARY_PROMPT = (
+    'We are close to the context limit of this chat. Write a compact, structured '
+    'handoff summary that a fresh chat can continue from. Cover: what we are '
+    'building, decisions made, files and symbols touched, open threads, and the '
+    'next concrete step. Start your reply with ' + SUMMARY_MARKER + '-START and '
+    'end it with ' + SUMMARY_MARKER + '-END, with no other text outside them.'
+)
 log = logging.getLogger(__name__)
 
 
@@ -124,6 +138,14 @@ class Api:
                 self.chat_urls[chat['id']] = chat['url']
         self.last_platforms = state.get('_last_platforms', {
             chat['id']: chat.get('platform') for chat in state.get('chats', []) if isinstance(chat, dict) and chat.get('id')})
+        # Token-budget migration: estimated token count per chat, the summary
+        # request ids we are waiting on, which platform each one targets, and
+        # chats whose owner pressed stop on the banner.
+        self._token_estimate = {}
+        self._summary_requests = set()
+        self._summary_platforms = {}
+        self._token_limit_stopped = set()
+        self._summary_inflight = set()
 
     def start(self):
         self.bridge.start()
@@ -230,6 +252,23 @@ class Api:
             event['operations'] = [self._operation({'id': item['id'], 'tool': item['tool'],
                                                     'args': item['args']})
                                    for item in requests if item['tool'] != '__parse_error__']
+        if event['type'] == 'assistant_response':
+            chat_id = event.get('chat_id', '')
+            text = event.get('text', '')
+            if rid in self._summary_requests:
+                self._summary_requests.discard(rid)
+                self._handle_summary(chat_id, self._summary_platforms.pop(rid, event.get('platform', 'chatgpt')), text)
+                event = {'type': 'summary_ready', 'chat_id': chat_id, 'ok': bool(text.strip())}
+            elif chat_id and not rid.startswith('prov-') and text:
+                estimate = self._token_estimate.get(chat_id, 0.0) + max(1, len(text.split())) * TOKEN_PER_WORD
+                self._token_estimate[chat_id] = estimate
+                warn_limit, hard_limit = self._token_limits(event.get('platform', ''))
+                if estimate >= warn_limit and chat_id not in self._token_limit_stopped:
+                    self.sink({'type': 'token_warning', 'chat_id': chat_id,
+                               'estimate': int(estimate), 'warn': warn_limit,
+                               'limit': hard_limit, 'auto': estimate >= hard_limit})
+                    if estimate >= hard_limit:
+                        self._auto_summarize(chat_id, event.get('platform', 'chatgpt'))
         if event['type'] == 'file_data':
             event['type'] = 'file_ready'
         self.sink(event)
@@ -502,7 +541,7 @@ class Api:
             os._exit(0)
 
     @guarded
-    def send_message(self, text, platform, chat_id, attachment=None, include_rules=False):
+    def send_message(self, text, platform, chat_id, attachment=None, include_rules=False, fresh=False):
         if not text.strip() and not attachment:
             raise ValueError('Write a message or attach a file.')
         if platform not in self._browser.homes:
@@ -523,7 +562,9 @@ class Api:
                 context = 'I changed my chat service. Here is the recent context of my conversation:\n' + transcript[-12000:] + '\n\nMy next message:\n'
         conv_url = self.chat_urls.get(chat_id)
         from urllib.parse import urlparse
-        if conv_url and urlparse(conv_url).netloc != urlparse(self._browser.homes[platform]).netloc:
+        if fresh:
+            conv_url = None
+        elif conv_url and urlparse(conv_url).netloc != urlparse(self._browser.homes[platform]).netloc:
             conv_url = None
         # Bounded routing memory; retain active turns and recent stopped turns.
         if len(self.requests) > 1000:
@@ -549,7 +590,8 @@ class Api:
                 prompt = 'I attached my full message as a text file. Please read it and respond to the instructions inside.'
             self._browser.open(platform)
             self.bridge.send({'type': 'user_message', 'text': prompt, 'platform': platform,
-                              'request_id': rid, 'conv_url': conv_url, 'attachment': file})
+                              'request_id': rid, 'conv_url': conv_url, 'attachment': file,
+                              'fresh': fresh})
             return {'request_id': rid}
         self._spawn(send, kind='message_queued', request_id=rid, chat_id=chat_id)
         return {'ok': True, 'request_id': rid}
@@ -905,6 +947,129 @@ class Api:
             self.provider = None
             self._start_provider()
         return {'ok': True, 'key': key}
+
+
+    def _token_limits(self, platform=''):
+        """Resolve the global and per-model token thresholds for this platform."""
+        config = self.config.get()
+        limit = int(config.get('token_limit', TOKEN_LIMIT) or TOKEN_LIMIT)
+        per_model = config.get('token_limits') or {}
+        if platform and platform in per_model:
+            limit = int(per_model[platform])
+        return max(1, int(round(limit * 0.88))), limit
+
+    def _auto_summarize(self, chat_id, platform):
+        if chat_id in self._summary_inflight:
+            return
+        self._summary_inflight.add(chat_id)
+        try:
+            self.summarize_now(chat_id, platform)
+        except Exception:
+            log.exception('Auto-summarize failed for %s', chat_id)
+            self._summary_inflight.discard(chat_id)
+
+    def _handle_summary(self, chat_id, platform, text):
+        self._summary_inflight.discard(chat_id)
+        start = text.find(SUMMARY_MARKER + '-START')
+        end = text.find(SUMMARY_MARKER + '-END')
+        if start >= 0 and end > start:
+            summary = text[start + len(SUMMARY_MARKER + '-START'):end].strip()
+        else:
+            summary = text.strip()
+        if not summary:
+            self.sink({'type': 'summary_failed', 'chat_id': chat_id, 'reason': 'empty'})
+            return
+        pending = getattr(self, '_pending_summary', None)
+        if pending is None:
+            pending = self._pending_summary = {}
+        pending[chat_id] = (platform, summary)
+        self.sink({'type': 'summary_migrate', 'chat_id': chat_id, 'platform': platform,
+                   'preview': summary[:600]})
+
+    @guarded
+    def token_limit_stop(self, chat_id=''):
+        chat_id = chat_id or (self.config.load_state().get('active_chat_id') or '')
+        self._token_limit_stopped.add(chat_id)
+        return {'ok': True, 'stopped': True}
+
+    @guarded
+    def token_status(self, chat_id=''):
+        chat_id = chat_id or (self.config.load_state().get('active_chat_id') or '')
+        platform = self.last_platforms.get(chat_id, '')
+        warn_limit, hard_limit = self._token_limits(platform)
+        return {'ok': True, 'estimate': int(self._token_estimate.get(chat_id, 0.0)),
+                'warn': warn_limit, 'limit': hard_limit,
+                'stopped': chat_id in self._token_limit_stopped}
+
+    @guarded
+    def summarize_now(self, chat_id='', platform=''):
+        chat_id = chat_id or (self.config.load_state().get('active_chat_id') or '')
+        platform = platform or self.last_platforms.get(chat_id) or 'chatgpt'
+        rid = 'sum-' + uuid.uuid4().hex
+        self._summary_requests.add(rid)
+        self._summary_platforms[rid] = platform
+        root = self.project['path'] if self.project else None
+        self.requests[rid] = {'chat_id': chat_id, 'workspace': root,
+                              'heartbeat': time.monotonic(), 'stopped': False}
+        self._browser.open(platform)
+        self.bridge.send({'type': 'user_message', 'text': SUMMARY_PROMPT, 'platform': platform,
+                          'request_id': rid, 'conv_url': self.chat_urls.get(chat_id),
+                          'attachment': None, 'fresh': False})
+        return {'ok': True, 'request_id': rid, 'chat_id': chat_id}
+
+    @guarded
+    def summary_accept(self, chat_id=''):
+        pending = getattr(self, '_pending_summary', {})
+        platform, summary = pending.pop(chat_id, (None, None))
+        if not summary:
+            return {'ok': False, 'error': 'No pending summary.'}
+        self.chat_urls.pop(chat_id, None)
+        self._token_estimate[chat_id] = 0.0
+        self._token_limit_stopped.discard(chat_id)
+        result = self.send_message('Handoff from the previous chat:\n\n' + summary, platform, chat_id,
+                                   include_rules=True, fresh=True)
+        return result
+
+    @guarded
+    def paste_execute(self, payload):
+        """Execute a pasted tool request and forward its result to the web chat.
+
+        The user pastes either a JSON object with tool/args or a plain shell
+        command. The result travels the same tool_result bridge path the model
+        would have triggered, so a request that never reached the model still
+        lands in the model's transcript.
+        """
+        text = str(payload or '').strip()
+        if not text:
+            raise ValueError('Paste a tool request or a command first.')
+        root = self.project['path'] if self.project else None
+        if not root:
+            raise ValueError('Attach a project first.')
+        chat_id = self.config.load_state().get('active_chat_id') or ''
+        platform = self.last_platforms.get(chat_id) or 'chatgpt'
+        request_id = None
+        for rid, owner in reversed(list(self.requests.items())):
+            if owner.get('chat_id') == chat_id:
+                request_id = rid
+                break
+        if not request_id:
+            request_id = 'paste-' + uuid.uuid4().hex
+            self.requests[request_id] = {'chat_id': chat_id, 'workspace': root,
+                                         'heartbeat': time.monotonic(), 'stopped': False}
+        tool, args = 'run_command', {'cmd': text}
+        try:
+            parsed = json.loads(text)
+            if isinstance(parsed, dict) and isinstance(parsed.get('tool'), str):
+                tool = parsed['tool']
+                args = parsed.get('args') or {}
+        except (ValueError, TypeError):
+            pass
+        ident = uuid.uuid4().hex
+        call = {'id': ident, 'tool': tool, 'args': args,
+                'platform': platform, 'request_id': request_id}
+        threading.Thread(target=self._execute_tool, args=(call,), daemon=True,
+                         name='paste-execute').start()
+        return {'ok': True, 'tool': tool, 'request_id': request_id, 'id': ident}
 
 
 def acquire_single_instance(base):

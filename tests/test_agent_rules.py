@@ -5,6 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 
 from desktop.config import ConfigStore, DEFAULT_RULES
+from desktop.app import Api
 
 
 def test_defaults_and_random_persisted_provider_keys(tmp_path):
@@ -192,3 +193,34 @@ def test_default_data_dir_migrates_legacy_versioned_dir(tmp_path, monkeypatch):
     assert (target / 'config.json').read_text(encoding='utf-8') == '{"full_access": false}'
     # The legacy directory is copied, never moved or deleted.
     assert legacy.exists()
+
+
+def test_token_limit_defaults_and_validation(tmp_path):
+    store = ConfigStore(tmp_path)
+    config = store.get()
+    assert config['token_limit'] == 4000
+    assert config['token_limits'] == {}
+    saved = store.update({'token_limit': 6000, 'token_limits': {'chatgpt': 3000}})
+    assert saved['token_limit'] == 6000
+    assert saved['token_limits'] == {'chatgpt': 3000}
+    for bad in ({'token_limit': 100}, {'token_limit': 99999}, {'token_limit': 'big'},
+                {'token_limits': []}, {'token_limits': {'chatgpt': 0}},
+                {'token_limits': {'chatgpt': 'x'}}):
+        try:
+            store.update(bad)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(f'token limits accepted bad value: {bad!r}')
+
+
+def test_token_limits_resolution_warns_at_eighty_eight_percent(tmp_path):
+    root = tmp_path/'workspace'
+    root.mkdir()
+    api = Api(tmp_path/'data')
+    warn, limit = api._token_limits('chatgpt')
+    assert (warn, limit) == (3520, 4000)
+    api.config.update({'token_limit': 5000, 'token_limits': {'chatgpt': 3000}})
+    assert api._token_limits('chatgpt') == (2640, 3000)
+    # A model without an override keeps the global limit.
+    assert api._token_limits('claude') == (4400, 5000)

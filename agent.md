@@ -80,6 +80,30 @@ Key locations:
     actually exist (no stale pins, no removed elements), it must read files
     as UTF-8 so it also runs on Windows, and `desktop/ui/app.js` must not
     build HTML strings for injection (`innerHTML` and friends stay banned).
+    **Native-layer rule:** the internal browser is a real WebView2 window that
+    floats above the DOM, so a `<dialog>` does *not* cover it. Every modal that
+    can open while the browser is docked must (a) be in the `visible` guard in
+    `window.__cbIbDockRect` (`!$('...Modal').open`) and (b) call `sendIbFit()`
+    on open and on `close`. The paste dialog missed both and fell behind the
+    browser; `tests/test_ui_paste_modal.py` pins the fix. Follow the
+    `hintModal`/`confirmModal` pattern for any new dialog.
+
+14. **Conversation handoff and the offline translation bundle** — the web
+    chat never exposes real token counts, so the budget is estimated
+    (`TOKEN_PER_WORD = 1.3` on the transcript). The limit is **not** a
+    constant anymore: `config.token_limit` (default 4000, 500..50000) is the
+    global budget and `config.token_limits` maps a platform id to a per-model
+    override; `Api._token_limits(platform)` resolves both and returns
+    `(warn, limit)` with `warn = round(limit * 0.88)`. Never hardcode 3400/3900
+    in new code — read the config. The automatic path asks the web
+    model for a summary delimited by `CB-SUMMARY-START`/`CB-SUMMARY-END`, then
+    hands it to a fresh chat with `send_message(..., include_rules=True,
+    fresh=True)`; `token_limit_stop` cancels the automatic path only. The
+    offline snapshot `window.__CB_BUNDLED_TRANSLATIONS` in `desktop/ui/i18n.js`
+    must mirror `desktop/translations/en.json` and `fa.json` exactly
+    (`tests/test_provider_settings.py::test_offline_bundle_mirrors_the_json_catalogs`
+    is the gate) — regenerate it after every catalog edit, never splice the
+    JSON line with a regex on `};` (it also appears inside string values).
 
 ## Session log
 
@@ -183,3 +207,39 @@ Key locations:
   pre-existing `innerHTML` sink in the code highlighter, so `highlightCode()`
   now returns DOM nodes (same spans and classes) and `updateLines()` uses
   `replaceChildren()`; no HTML string is injected anymore.
+
+- 2026-11-21 — added three user features. (1) The composer is right-to-left:
+  `dir="rtl"` on `#composerInput` plus `.composer textarea[dir="rtl"]{text-align:right}`.
+  (2) Paste a tool request: `Api.paste_execute(payload)` in `desktop/app.py`
+  parses a JSON tool call or treats the text as a `run_command`, executes it
+  through `_execute_tool` so the result travels the normal `tool_result`
+  bridge path, and the UI dialog `#pasteModal` (opened by `#pasteBtn`) calls
+  it. (3) Automatic conversation handoff (rule 14): token estimate + banner +
+  `token_limit_stop` + `summarize_now` + `summary_accept`, with the
+  `token_warning`/`summary_migrate`/`summary_failed` UI cases. `send_message()`
+  gained `fresh=False` for the new-chat hop. Locale keys and the offline
+  `i18n.js` snapshot were regenerated; six DOM pins were added. Verified:
+  `py_compile` green, `node --check` green (app.js, i18n.js), DOM gate green
+  (202 ids, 273 keys), `pytest -q` green (420 passed, 5 skipped). The
+  recurring `test_cross_instance_concurrent_atomic_updates_and_state`
+  `PermissionError` flake fired once under load and passed in isolation — it
+  is unrelated to these changes. Lesson: do not rebuild `i18n.js` line 49 with
+  a `rsplit('};', 1)` — `};` also occurs inside string values (the first
+  attempt corrupted the file); rebuild from `git show HEAD:desktop/ui/i18n.js`
+  and replace only the full `window.__CB_BUNDLED_TRANSLATIONS = ...;` statement.
+
+- 2026-11-21 — made the token budget configurable. `desktop/config.py` gains
+  `token_limit` (default 4000, validated 500..50000) and `token_limits`
+  (platform id → int); `Api._token_limits(platform)` resolves the override and
+  returns `(warn, limit)` with `warn = round(limit * 0.88)`. `_event`,
+  `token_status` and the auto-summary path read it instead of the old
+  `TOKEN_WARN`/`TOKEN_LIMIT` constants (the constants remain only as fallbacks
+  for a missing config). Settings > General gets `#tokenLimitInput`;
+  `renderModels()` puts a small `token-limit-input` next to every model that
+  writes `config.token_limits`. Locale keys `token_limit` /
+  `token_limit_description`, offline `i18n.js` snapshot, `ui_dom_check.py` pin
+  and two `test_agent_rules.py` cases were added. Note: the offline i18n line
+  must be rebuilt from the full prefix (`window.__CB_BUNDLED_TRANSLATIONS = `)
+  and the catalogs, not by regex-splitting on `};` — see the 2026-11-21 lesson
+  above. Verified: `py_compile` green, `node --check` green, DOM gate green
+  (203 ids, 275 keys), `pytest -q` green (422 passed, 5 skipped).

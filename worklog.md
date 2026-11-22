@@ -1,6 +1,6 @@
-# ChatBridge 2.71.0 worklog
+# ChatBridge 2.80.0 worklog
 
-## 2.71.0 — source implementation
+## 2.80.0 — source implementation
 
 This is a new implementation from the supplied specification, not a modification of a pre-existing release. The architecture uses a single internal WebView2 browser driver, a loopback authenticated WebSocket bridge, a vanilla desktop UI, and Python tools. There is no extension and no browser-mode selection.
 

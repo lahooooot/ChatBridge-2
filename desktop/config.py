@@ -12,7 +12,7 @@ import threading
 from pathlib import Path
 from typing import Any
 
-RULES_VERSION = "2.71.0"
+RULES_VERSION = "2.80.0"
 # The data directory is intentionally NOT version-suffixed: settings, chat
 # history, the audit log and the WebView2 login profile must survive upgrades.
 # RULES_VERSION still versions the built-in agent rules for migrations.
@@ -126,6 +126,7 @@ def _defaults() -> dict:
         "agent_rules_version": RULES_VERSION,
         "agent_rules_defaults": {rule["id"]: rule["text"] for rule in DEFAULT_RULES},
         "language": "en", "theme": "dark", "font_size": 14,
+        "token_limit": 4000, "token_limits": {},
     }
 
 
@@ -250,6 +251,17 @@ class ConfigStore:
             if model["id"] in seen or not model["home"].startswith(("https://", "http://")):
                 raise ValueError("Custom model IDs must be unique and home must be an HTTP URL")
             seen.add(model["id"])
+        limit = config.get("token_limit")
+        if type(limit) is not int or not 500 <= limit <= 50000:
+            raise ValueError("token_limit must be an integer between 500 and 50000")
+        per_model = config.get("token_limits")
+        if not isinstance(per_model, dict):
+            raise ValueError("token_limits must be an object")
+        for platform_id, value in per_model.items():
+            if not isinstance(platform_id, str) or not platform_id:
+                raise ValueError("token_limits keys must be nonempty strings")
+            if type(value) is not int or not 500 <= value <= 50000:
+                raise ValueError("Every token_limits value must be an integer between 500 and 50000")
         _validate_rules(config["agent_rules"])
 
     def get(self) -> dict:

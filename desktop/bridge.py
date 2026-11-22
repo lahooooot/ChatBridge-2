@@ -9,7 +9,7 @@ import threading
 from collections import deque
 
 log = logging.getLogger(__name__)
-VERSION = '2.71.0'
+VERSION = '2.80.0'
 
 
 class UISink:
